@@ -1,0 +1,13 @@
+# Environment variables (contains private keys - NEVER commit)
+.env
+
+# Hardhat build artifacts
+artifacts/
+cache/
+
+# Node dependencies
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db

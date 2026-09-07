@@ -1,0 +1,229 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deploy NFT Contracts — Ethereum Sepolia</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+    <script src="artifacts.js"></script>
+</head>
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <div class="logo-group">
+                <span class="logo-icon">🚀</span>
+                <div>
+                    <h1 class="logo-title">Contract Deployer</h1>
+                    <p class="logo-subtitle">Deploy BlockchainIdentityNFT & NFTMarketplace to Ethereum Sepolia</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="index.html" class="btn btn--ghost">← Back to DApp</a>
+                <button id="connectBtn" class="btn btn--primary">🦊 Connect MetaMask</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="main" style="max-width: 800px; margin: 2rem auto; padding: 0 1.25rem;">
+        <section class="card">
+            <div class="card-header">
+                <h2 class="card-title">📦 Sepolia Contract Deployment</h2>
+                <span id="deployStatusBadge" class="badge badge--offline">Ready</span>
+            </div>
+            <div class="card-body">
+                <p>Deploy the real compiled smart contracts directly using your connected MetaMask wallet. You will sign two transactions on Sepolia testnet to deploy both contracts.</p>
+
+                <div class="info-grid" style="margin: 1.25rem 0;">
+                    <div class="info-item">
+                        <span class="info-label">Connected Wallet</span>
+                        <code id="deployerAddress" class="address">—</code>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Network</span>
+                        <span id="networkDisplay" class="info-value">—</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Sepolia Balance</span>
+                        <span id="balanceDisplay" class="info-value">—</span>
+                    </div>
+                </div>
+
+                <div id="statusBox" class="tx-status" hidden></div>
+
+                <div class="form-actions" style="margin-top: 1.5rem;">
+                    <button id="startDeployBtn" class="btn btn--primary btn--lg" disabled>🚀 Deploy Both Contracts</button>
+                </div>
+
+                <div id="resultsCard" class="card" style="margin-top: 1.5rem; background: var(--bg-input);" hidden>
+                    <div class="card-body">
+                        <h3 style="margin-bottom: 0.75rem; color: var(--success);">🎉 Contracts Successfully Deployed!</h3>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="info-label">BlockchainIdentityNFT Address</span>
+                                <code id="resultNftAddress" class="address" style="color: var(--accent);"></code>
+                                <a id="resultNftLink" href="#" target="_blank" rel="noopener noreferrer" class="link">View on Sepolia Etherscan ↗</a>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">NFTMarketplace Address</span>
+                                <code id="resultMarketAddress" class="address" style="color: var(--accent);"></code>
+                                <a id="resultMarketLink" href="#" target="_blank" rel="noopener noreferrer" class="link">View on Sepolia Etherscan ↗</a>
+                            </div>
+                        </div>
+                        <p style="margin-top: 1rem; font-size: 0.9rem;">Copy these two addresses into <code>app.js</code> in the <code>CONTRACTS.sepolia</code> object, or click the button below to copy the ready-to-paste snippet:</p>
+                        <div class="form-actions" style="margin-top: 0.75rem;">
+                            <button id="copyConfigBtn" class="btn btn--primary btn--sm">📋 Copy Config Snippet</button>
+                            <a href="index.html" class="btn btn--ghost btn--sm">Go to NFT Marketplace →</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const SEPOLIA_CHAIN_ID_HEX = "0xaa36a7";
+        let provider, signer, account;
+
+        const connectBtn = document.getElementById("connectBtn");
+        const startDeployBtn = document.getElementById("startDeployBtn");
+        const deployerAddress = document.getElementById("deployerAddress");
+        const networkDisplay = document.getElementById("networkDisplay");
+        const balanceDisplay = document.getElementById("balanceDisplay");
+        const statusBox = document.getElementById("statusBox");
+        const resultsCard = document.getElementById("resultsCard");
+        const resultNftAddress = document.getElementById("resultNftAddress");
+        const resultMarketAddress = document.getElementById("resultMarketAddress");
+        const resultNftLink = document.getElementById("resultNftLink");
+        const resultMarketLink = document.getElementById("resultMarketLink");
+        const copyConfigBtn = document.getElementById("copyConfigBtn");
+
+        let deployedNft = "";
+        let deployedMarket = "";
+
+        async function init() {
+            if (!window.ethereum) {
+                statusBox.hidden = false;
+                statusBox.className = "tx-status is-error";
+                statusBox.textContent = "MetaMask not detected. Please install MetaMask.";
+                return;
+            }
+            provider = new ethers.BrowserProvider(window.ethereum);
+            try {
+                const accounts = await window.ethereum.request({ method: "eth_accounts" });
+                if (accounts.length > 0) {
+                    await setupAccount(accounts[0]);
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function setupAccount(acc) {
+            account = acc;
+            signer = await provider.getSigner();
+            deployerAddress.textContent = account;
+            connectBtn.textContent = account.slice(0, 6) + "…" + account.slice(-4);
+            connectBtn.disabled = true;
+
+            const chainIdHex = await window.ethereum.request({ method: "eth_chainId" });
+            const chainId = parseInt(chainIdHex, 16).toString();
+            if (chainId === "11155111") {
+                networkDisplay.innerHTML = '<span class="badge badge--success">Ethereum Sepolia</span>';
+                startDeployBtn.disabled = false;
+            } else {
+                networkDisplay.innerHTML = '<span class="badge badge--danger">Wrong Network</span> <button onclick="switchNetwork()" class="btn btn--ghost btn--sm">Switch to Sepolia</button>';
+                startDeployBtn.disabled = true;
+            }
+
+            try {
+                const bal = await provider.getBalance(account);
+                const eth = parseFloat(ethers.formatEther(bal)).toFixed(4);
+                balanceDisplay.textContent = eth + " SepoliaETH";
+                if (bal === 0n) {
+                    statusBox.hidden = false;
+                    statusBox.className = "tx-status is-error";
+                    statusBox.textContent = "Your account has 0 Sepolia ETH. Please get free test ETH from a Sepolia faucet.";
+                    startDeployBtn.disabled = true;
+                }
+            } catch (_) {}
+        }
+
+        async function connect() {
+            try {
+                const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+                if (accounts.length > 0) await setupAccount(accounts[0]);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function switchNetwork() {
+            try {
+                await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: SEPOLIA_CHAIN_ID_HEX }] });
+                location.reload();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function deployContracts() {
+            if (!signer || !ARTIFACTS) return;
+            startDeployBtn.disabled = true;
+            statusBox.hidden = false;
+            statusBox.className = "tx-status is-pending";
+
+            try {
+                // 1. Deploy NFT
+                statusBox.innerHTML = '<div class="spinner"></div> [1/2] Please confirm BlockchainIdentityNFT deployment in MetaMask…';
+                const nftFactory = new ethers.ContractFactory(ARTIFACTS.nft.abi, ARTIFACTS.nft.bytecode, signer);
+                const nftContract = await nftFactory.deploy();
+                statusBox.innerHTML = '<div class="spinner"></div> [1/2] Deploying BlockchainIdentityNFT on Sepolia blockchain…';
+                await nftContract.waitForDeployment();
+                deployedNft = await nftContract.getAddress();
+
+                // 2. Deploy Marketplace
+                statusBox.innerHTML = '<div class="spinner"></div> [2/2] Please confirm NFTMarketplace deployment in MetaMask…';
+                const marketFactory = new ethers.ContractFactory(ARTIFACTS.marketplace.abi, ARTIFACTS.marketplace.bytecode, signer);
+                const marketContract = await marketFactory.deploy();
+                statusBox.innerHTML = '<div class="spinner"></div> [2/2] Deploying NFTMarketplace on Sepolia blockchain…';
+                await marketContract.waitForDeployment();
+                deployedMarket = await marketContract.getAddress();
+
+                // Success!
+                statusBox.className = "tx-status is-success";
+                statusBox.textContent = "Both contracts deployed successfully on Ethereum Sepolia!";
+
+                resultNftAddress.textContent = deployedNft;
+                resultNftLink.href = "https://sepolia.etherscan.io/address/" + deployedNft;
+                resultMarketAddress.textContent = deployedMarket;
+                resultMarketLink.href = "https://sepolia.etherscan.io/address/" + deployedMarket;
+                resultsCard.hidden = false;
+
+                // Try to save to server if endpoint exists, otherwise user copies
+                copyConfigBtn.onclick = () => {
+                    const snippet = `const CONTRACTS = {\n    sepolia: {\n        identity:    "0x33F5422Dc7fca52D844a8e382A885C6832E72E60",\n        nft:         "${deployedNft}",\n        marketplace: "${deployedMarket}"\n    }\n};`;
+                    navigator.clipboard.writeText(snippet);
+                    copyConfigBtn.textContent = "Copied ✓";
+                    setTimeout(() => copyConfigBtn.textContent = "📋 Copy Config Snippet", 2500);
+                };
+
+            } catch (err) {
+                console.error(err);
+                statusBox.className = "tx-status is-error";
+                if (err.code === "ACTION_REJECTED" || err.code === 4001) {
+                    statusBox.textContent = "Deployment was cancelled in MetaMask.";
+                } else {
+                    statusBox.textContent = "Deployment failed: " + (err.message || err);
+                }
+                startDeployBtn.disabled = false;
+            }
+        }
+
+        connectBtn.addEventListener("click", connect);
+        startDeployBtn.addEventListener("click", deployContracts);
+        init();
+    </script>
+</body>
+</html>

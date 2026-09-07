@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blockchain Identity & NFT Marketplace — Ethereum Sepolia</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="alternate icon" href="favicon.ico">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="logo-group">
+                <span class="logo-icon" aria-hidden="true">⬡</span>
+                <div>
+                    <h1 class="logo-title">Blockchain Identity</h1>
+                    <p class="logo-subtitle">Identity & NFT Marketplace on Ethereum Sepolia</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <span id="networkBadge" class="badge badge--offline" aria-live="polite">Not Connected</span>
+                <button id="connectBtn" class="btn btn--primary" aria-label="Connect MetaMask wallet">
+                    <span class="btn-icon" aria-hidden="true">🦊</span> Connect Wallet
+                </button>
+            </div>
+        </div>
+        <!-- Tab Navigation -->
+        <nav id="mainNav" class="tab-nav">
+            <button class="tab-btn active" data-tab="all">✨ All</button>
+            <button class="tab-btn" data-tab="create-nft">🎨 Create NFT</button>
+            <button class="tab-btn" data-tab="marketplace">🏪 Marketplace</button>
+            <button class="tab-btn" data-tab="my-nfts">🖼️ My NFTs</button>
+            <button class="tab-btn" data-tab="identity">🆔 My Identity</button>
+            <button class="tab-btn" data-tab="activity">📜 Activity</button>
+        </nav>
+    </header>
+
+    <main class="main">
+        <!-- METAMASK NOT INSTALLED -->
+        <section id="noMetamaskCard" class="card card--warning" hidden>
+            <div class="card-header"><h2 class="card-title">⚠️ MetaMask Required</h2></div>
+            <div class="card-body">
+                <p>MetaMask is not installed. This DApp requires MetaMask to interact with the Ethereum Sepolia blockchain.</p>
+                <a href="https://metamask.io/download/" target="_blank" rel="noopener noreferrer" class="btn btn--primary">Install MetaMask →</a>
+            </div>
+        </section>
+
+        <!-- WRONG NETWORK WARNING -->
+        <section id="wrongNetworkCard" class="card card--danger" hidden>
+            <div class="card-header"><h2 class="card-title">🔴 Wrong Network</h2></div>
+            <div class="card-body">
+                <p>Please switch to <strong>Ethereum Sepolia</strong> to use this DApp. Blockchain operations are disabled on the current network.</p>
+                <button id="switchNetworkBtn" class="btn btn--primary">Switch to Sepolia</button>
+            </div>
+        </section>
+
+        <!-- NFT CONTRACTS SETUP / DIAGNOSTIC CARD -->
+        <section id="setupCard" class="card card--warning" hidden>
+            <div class="card-header"><h2 class="card-title" id="setupCardTitle">⚙️ NFT Contracts Setup Required</h2></div>
+            <div class="card-body">
+                <p id="setupCardMessage">The NFT and Marketplace smart contracts have not been deployed yet. Identity features work, but NFT features require contract deployment.</p>
+                <div id="setupCardDetails" class="info-grid" style="margin-top:0.75rem; margin-bottom:0.75rem;"></div>
+                <div class="form-actions" id="setupCardActions">
+                    <a href="deploy.html" class="btn btn--primary btn--sm">🚀 1-Click Deploy with MetaMask</a>
+                    <a href="contracts/DEPLOYMENT_GUIDE.md" target="_blank" class="btn btn--ghost btn--sm">📖 Hardhat Guide</a>
+                    <a href="https://sepolia.etherscan.io" target="_blank" rel="noopener noreferrer" class="btn btn--ghost btn--sm">🔍 Sepolia Etherscan ↗</a>
+                    <a href="https://app.pinata.cloud/" target="_blank" rel="noopener noreferrer" class="btn btn--ghost btn--sm">📁 Pinata IPFS ↗</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- ======== TAB: DASHBOARD ======== -->
+        <div id="tabDashboard" class="tab-content active">
+            <!-- Welcome Card (shown when wallet is not connected) -->
+            <section id="welcomeCard" class="card">
+                <div class="card-header">
+                    <h2 class="card-title">👋 Welcome to Blockchain Identity & NFT Marketplace</h2>
+                    <span class="badge badge--offline">Ethereum Sepolia</span>
+                </div>
+                <div class="card-body">
+                    <p>Create and mint unique ERC-721 NFTs, trade in the decentralized marketplace, and store your on-chain identity permanently on Ethereum Sepolia.</p>
+                    <div class="form-actions" style="margin-top: 1rem;">
+                        <button type="button" id="welcomeConnectBtn" class="btn btn--primary"><span class="btn-icon">🦊</span> Connect Wallet to Start</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Wallet Card -->
+            <section id="walletCard" class="card" hidden>
+                <div class="card-header">
+                    <h2 class="card-title">🔗 Wallet</h2>
+                    <span class="badge badge--success">Connected ✓</span>
+                </div>
+                <div class="card-body">
+                    <div class="info-grid info-grid--row">
+                        <div class="info-item">
+                            <span class="info-label">Address</span>
+                            <span class="info-value">
+                                <code id="walletShort" class="address"></code>
+                                <button id="copyAddressBtn" class="btn btn--ghost btn--sm" aria-label="Copy full wallet address" title="Copy full address">📋</button>
+                                <span id="copyFeedback" class="copy-feedback" aria-live="polite" hidden>Copied!</span>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Network</span>
+                            <span id="walletNetwork" class="info-value">Ethereum Sepolia</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Balance</span>
+                            <span class="info-value">
+                                <span id="walletBalance">—</span>
+                                <small class="hint">Test ETH for Sepolia gas.</small>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">NFTs Owned</span>
+                            <span id="statNftsOwned" class="info-value info-value--large">—</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Identity Preview -->
+            <section id="identityPreview" class="card" hidden>
+                <div class="card-header">
+                    <h2 class="card-title">🆔 Blockchain Identity</h2>
+                    <button class="btn btn--ghost btn--sm" data-tab-link="identity">Manage →</button>
+                </div>
+                <div id="identityPreviewBody" class="card-body">
+                    <p id="identityPreviewText" class="text-muted">Loading identity…</p>
+                </div>
+            </section>
+
+            <!-- NFT Stats -->
+            <section id="nftStatsCard" class="card" hidden>
+                <div class="card-header">
+                    <h2 class="card-title">📊 NFT Overview</h2>
+                    <button id="refreshAllBtn" class="btn btn--ghost btn--sm">🔄 Refresh All</button>
+                </div>
+                <div class="card-body">
+                    <div class="stats-row">
+                        <div class="stat-box">
+                            <span class="stat-number" id="statTotalMinted">—</span>
+                            <span class="stat-label">Total Minted</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-number" id="statMyNfts">—</span>
+                            <span class="stat-label">My NFTs</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-number" id="statListedCount">—</span>
+                            <span class="stat-label">Listed</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ======== TAB: MY IDENTITY ======== -->
+        <div id="tabIdentity" class="tab-content active">
+            <!-- Identity Card -->
+            <section id="identityCard" class="card">
+                <div class="card-header">
+                    <h2 class="card-title">🆔 My Blockchain Identity</h2>
+                    <button id="refreshBtn" class="btn btn--ghost btn--sm" aria-label="Refresh blockchain data">🔄 Refresh Data</button>
+                </div>
+                <div id="identityLoading" class="card-body state-msg" hidden>
+                    <div class="spinner" aria-hidden="true"></div>
+                    <p aria-live="polite">Reading blockchain data — no gas required.</p>
+                </div>
+                <div id="identityEmpty" class="card-body state-msg" hidden>
+                    <p aria-live="polite">No blockchain information found for this wallet.</p>
+                    <small>Fill in the form below to create your on-chain identity.</small>
+                </div>
+                <div id="identityData" class="card-body" hidden>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Name</span>
+                            <span id="displayName" class="info-value info-value--large"></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Role</span>
+                            <span id="displayRole" class="info-value info-value--large"></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Wallet</span>
+                            <code id="displayWallet" class="info-value address"></code>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Data Source</span>
+                            <span class="info-value">Ethereum Sepolia Blockchain</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Store/Update Form -->
+            <section id="formCard" class="card">
+                <div class="card-header">
+                    <h2 class="card-title" id="formTitle">📝 Store Information on Blockchain</h2>
+                </div>
+                <div class="card-body">
+                    <form id="storeForm" novalidate>
+                        <div class="form-group">
+                            <label for="inputName" class="form-label">Full Name</label>
+                            <input type="text" id="inputName" class="form-input" placeholder="e.g. Dhiraj" maxlength="100" required>
+                            <span id="nameError" class="form-error" role="alert" hidden></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="inputRole" class="form-label">Role</label>
+                            <input type="text" id="inputRole" class="form-input" placeholder="e.g. Student" maxlength="100" required>
+                            <span id="roleError" class="form-error" role="alert" hidden></span>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" id="submitBtn" class="btn btn--primary btn--lg">Save to Blockchain</button>
+                        </div>
+                        <div class="form-hints">
+                            <small>💡 Saving data changes blockchain state and requires Sepolia ETH for gas.</small>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Transaction Card -->
+            <section id="txCard" class="card" hidden>
+                <div class="card-header"><h2 class="card-title">📦 Latest Transaction</h2></div>
+                <div class="card-body">
+                    <div id="txStatus" class="tx-status" aria-live="polite"></div>
+                    <div id="txDetails" class="info-grid" hidden>
+                        <div class="info-item">
+                            <span class="info-label">Transaction Hash</span>
+                            <code id="txHash" class="info-value address"></code>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Block Number</span>
+                            <span id="txBlock" class="info-value"></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Status</span>
+                            <span id="txResult" class="info-value"></span>
+                        </div>
+                    </div>
+                    <div id="txActions" class="form-actions" hidden>
+                        <a id="etherscanTxLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn--primary">View on Sepolia Etherscan ↗</a>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Blockchain Details -->
+            <section id="detailsCard" class="card">
+                <div class="card-header"><h2 class="card-title">⛓️ Blockchain Details</h2></div>
+                <div class="card-body">
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Network</span>
+                            <span class="info-value">Ethereum Sepolia</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Chain ID</span>
+                            <span class="info-value">11155111</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Identity Contract</span>
+                            <span class="info-value">
+                                <code class="address">0x33F5422Dc7fca52D844a8e382A885C6832E72E60</code>
+                                <button id="copyContractBtn" class="btn btn--ghost btn--sm" title="Copy">📋</button>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">NFT Contract</span>
+                            <span class="info-value">
+                                <code id="nftContractDisplay" class="address"><a href="https://sepolia.etherscan.io/address/0x7aF25E48e8F80De26DA27b29659e661eA438Da93" target="_blank" rel="noopener noreferrer" class="link">0x7aF25E48e8F80De26DA27b29659e661eA438Da93 ↗</a></code>
+                                <button id="copyNftContractBtn" class="btn btn--ghost btn--sm" title="Copy">📋</button>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Marketplace Contract</span>
+                            <span class="info-value">
+                                <code id="marketplaceContractDisplay" class="address"><a href="https://sepolia.etherscan.io/address/0x284eF61ce8e59959249D1Be80d7FadB9F3E58e11" target="_blank" rel="noopener noreferrer" class="link">0x284eF61ce8e59959249D1Be80d7FadB9F3E58e11 ↗</a></code>
+                                <button id="copyMarketplaceBtn" class="btn btn--ghost btn--sm" title="Copy">📋</button>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Contract Connection Status</span>
+                            <div class="status-tags" style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.35rem;">
+                                <span id="debugWalletStatus" class="badge badge--offline">Wallet: Disconnected</span>
+                                <span id="debugNetworkStatus" class="badge badge--offline">Network: Sepolia (11155111)</span>
+                                <span id="debugIdentityStatus" class="badge badge--success">Identity: Connected ✓</span>
+                                <span id="debugNftStatus" class="badge badge--success">NFT: Configured (Sepolia) ✓</span>
+                                <span id="debugMarketStatus" class="badge badge--success">Marketplace: Configured (Sepolia) ✓</span>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Blockchain Explorers</span>
+                            <div style="display:flex; flex-direction:column; gap:0.35rem;">
+                                <a href="https://sepolia.etherscan.io/address/0x33F5422Dc7fca52D844a8e382A885C6832E72E60" target="_blank" rel="noopener noreferrer" class="link">View Identity Contract on Sepolia Etherscan ↗</a>
+                                <span id="nftExplorerLinkWrap"><a id="nftExplorerLink" href="https://sepolia.etherscan.io/address/0x7aF25E48e8F80De26DA27b29659e661eA438Da93" target="_blank" rel="noopener noreferrer" class="link">View NFT Contract on Sepolia Etherscan ↗</a></span>
+                                <span id="marketExplorerLinkWrap"><a id="marketExplorerLink" href="https://sepolia.etherscan.io/address/0x284eF61ce8e59959249D1Be80d7FadB9F3E58e11" target="_blank" rel="noopener noreferrer" class="link">View Marketplace Contract on Sepolia Etherscan ↗</a></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ======== TAB: CREATE NFT ======== -->
+        <div id="tabCreateNft" class="tab-content active">
+            <section class="card">
+                <div class="card-header"><h2 class="card-title">🎨 Create NFT</h2></div>
+                <div class="card-body">
+                    <div class="steps-info">
+                        <span class="step-pill">1. Add Info</span>
+                        <span class="step-arrow">→</span>
+                        <span class="step-pill">2. Prepare Metadata</span>
+                        <span class="step-arrow">→</span>
+                        <span class="step-pill">3. Mint on Sepolia</span>
+                    </div>
+
+                    <!-- Metadata mode toggle -->
+                    <div class="form-group">
+                        <label class="form-label">Metadata Mode</label>
+                        <div class="toggle-group">
+                            <button type="button" id="modeAutoBtn" class="btn btn--sm btn--primary">Auto-generate</button>
+                            <button type="button" id="modeManualBtn" class="btn btn--sm btn--ghost">Paste IPFS URI</button>
+                        </div>
+                        <small class="hint">Auto-generate creates metadata from the fields below. Manual lets you paste a pre-uploaded IPFS metadata URI.</small>
+                    </div>
+
+                    <!-- Auto mode fields -->
+                    <div id="autoMetadataFields">
+                        <div class="form-group">
+                            <label for="nftNameInput" class="form-label">NFT Name *</label>
+                            <input type="text" id="nftNameInput" class="form-input" placeholder="e.g. My First NFT" maxlength="100" required>
+                            <span id="nftNameError" class="form-error" role="alert" hidden></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="nftDescInput" class="form-label">Description *</label>
+                            <textarea id="nftDescInput" class="form-input form-textarea" placeholder="Describe your NFT…" maxlength="500" rows="3" required></textarea>
+                            <span id="nftDescError" class="form-error" role="alert" hidden></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="nftImageInput" class="form-label">Image URI *</label>
+                            <input type="text" id="nftImageInput" class="form-input" placeholder="ipfs://Qm... or https://..." required>
+                            <span id="nftImageError" class="form-error" role="alert" hidden></span>
+                            <small class="hint">Upload your image to <a href="https://app.pinata.cloud/" target="_blank" rel="noopener noreferrer">Pinata</a> or <a href="https://nft.storage/" target="_blank" rel="noopener noreferrer">NFT.Storage</a>, then paste the IPFS URI here.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="nftCategoryInput" class="form-label">Category (optional)</label>
+                            <input type="text" id="nftCategoryInput" class="form-input" placeholder="e.g. Art, Photography, PFP" maxlength="50">
+                        </div>
+                    </div>
+
+                    <!-- Manual mode field -->
+                    <div id="manualMetadataFields" hidden>
+                        <div class="form-group">
+                            <label for="manualUriInput" class="form-label">Metadata URI *</label>
+                            <input type="text" id="manualUriInput" class="form-input" placeholder="ipfs://Qm... or data:application/json;base64,...">
+                            <span id="manualUriError" class="form-error" role="alert" hidden></span>
+                            <small class="hint">Paste the full URI to your NFT metadata JSON (must follow ERC-721 metadata standard).</small>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" id="mintBtn" class="btn btn--primary btn--lg">Mint NFT on Blockchain</button>
+                    </div>
+                    <div class="form-hints">
+                        <small>💡 Minting changes blockchain state and requires Sepolia ETH for gas.</small>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Mint Transaction Status -->
+            <section id="mintTxCard" class="card" hidden>
+                <div class="card-header"><h2 class="card-title">📦 Mint Transaction</h2></div>
+                <div class="card-body">
+                    <div id="mintTxStatus" class="tx-status" aria-live="polite"></div>
+                    <div id="mintTxDetails" class="info-grid" hidden>
+                        <div class="info-item">
+                            <span class="info-label">Token ID</span>
+                            <span id="mintTokenId" class="info-value info-value--large"></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Transaction Hash</span>
+                            <code id="mintTxHash" class="info-value address"></code>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Block Number</span>
+                            <span id="mintTxBlock" class="info-value"></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Status</span>
+                            <span id="mintTxResult" class="info-value"></span>
+                        </div>
+                    </div>
+                    <div id="mintTxActions" class="form-actions" hidden>
+                        <a id="mintEtherscanLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn--primary">View on Etherscan ↗</a>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ======== TAB: MY NFTS ======== -->
+        <div id="tabMyNfts" class="tab-content active">
+            <section class="card">
+                <div class="card-header">
+                    <h2 class="card-title">🖼️ My NFTs</h2>
+                    <button id="refreshMyNftsBtn" class="btn btn--ghost btn--sm">🔄 Refresh</button>
+                </div>
+                <div id="myNftsLoading" class="card-body state-msg" hidden>
+                    <div class="spinner" aria-hidden="true"></div>
+                    <p>Loading your NFTs from the blockchain…</p>
+                </div>
+                <div id="myNftsEmpty" class="card-body state-msg" hidden>
+                    <p>You don't own any NFTs yet.</p>
+                    <button class="btn btn--primary" data-tab-link="create-nft">Create Your First NFT</button>
+                </div>
+                <div id="myNftsGrid" class="nft-grid card-body" hidden></div>
+            </section>
+        </div>
+
+        <!-- ======== TAB: MARKETPLACE ======== -->
+        <div id="tabMarketplace" class="tab-content active">
+            <section class="card">
+                <div class="card-header">
+                    <h2 class="card-title">🏪 NFT Marketplace</h2>
+                    <button id="refreshMarketBtn" class="btn btn--ghost btn--sm">🔄 Refresh</button>
+                </div>
+                <div id="marketLoading" class="card-body state-msg" hidden>
+                    <div class="spinner" aria-hidden="true"></div>
+                    <p>Loading marketplace listings…</p>
+                </div>
+                <div id="marketEmpty" class="card-body state-msg" hidden>
+                    <p>No NFTs are currently listed for sale.</p>
+                </div>
+                <div id="marketGrid" class="nft-grid card-body" hidden></div>
+            </section>
+        </div>
+
+        <!-- ======== TAB: ACTIVITY ======== -->
+        <div id="tabActivity" class="tab-content active">
+            <section class="card">
+                <div class="card-header">
+                    <h2 class="card-title">📜 Recent NFT Activity</h2>
+                    <button id="refreshActivityBtn" class="btn btn--ghost btn--sm">🔄 Refresh</button>
+                </div>
+                <div id="activityLoading" class="card-body state-msg" hidden>
+                    <div class="spinner" aria-hidden="true"></div>
+                    <p>Loading activity from blockchain events…</p>
+                </div>
+                <div id="activityEmpty" class="card-body state-msg" hidden>
+                    <p>No NFT activity found yet.</p>
+                </div>
+                <div id="activityBody" class="card-body" hidden>
+                    <div class="table-wrapper">
+                        <table class="activity-table">
+                            <thead>
+                                <tr>
+                                    <th>Action</th>
+                                    <th>Token ID</th>
+                                    <th>From</th>
+                                    <th>To</th>
+                                    <th>Price</th>
+                                    <th>Tx</th>
+                                </tr>
+                            </thead>
+                            <tbody id="activityTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ======== HOW IT WORKS (always visible) ======== -->
+        <section id="helpCard" class="card">
+            <div class="card-header"><h2 class="card-title">❓ How This NFT Marketplace Works</h2></div>
+            <div class="card-body help-body">
+                <div class="help-columns">
+                    <div class="help-col">
+                        <h3>🎨 Minting</h3>
+                        <p>An NFT is created by the smart contract and assigned a unique token ID. The metadata (name, image) is stored off-chain on IPFS; only the URI is recorded on-chain.</p>
+                    </div>
+                    <div class="help-col">
+                        <h3>👤 Ownership</h3>
+                        <p>The NFT contract records which wallet owns each token via <code>ownerOf(tokenId)</code>. This is the blockchain source of truth.</p>
+                    </div>
+                    <div class="help-col">
+                        <h3>💰 Selling</h3>
+                        <p>The owner approves the marketplace contract, then lists the NFT at a price. The NFT stays in your wallet until someone buys it.</p>
+                    </div>
+                    <div class="help-col">
+                        <h3>🛒 Buying</h3>
+                        <p>The buyer sends Sepolia ETH through the marketplace. The contract transfers the NFT to the buyer and ETH to the seller atomically.</p>
+                    </div>
+                    <div class="help-col">
+                        <h3>📖 Reading (Free)</h3>
+                        <p>Reading data (ownership, metadata, listings) uses <em>view</em> functions — no gas, no MetaMask popup.</p>
+                    </div>
+                    <div class="help-col">
+                        <h3>✍️ Writing (Gas)</h3>
+                        <p>Minting, listing, buying, and transferring create real transactions requiring Sepolia ETH. MetaMask signs — your private key never leaves your wallet.</p>
+                    </div>
+                </div>
+                <div class="flow-diagram">
+                    User → Website → ethers.js → MetaMask → Ethereum Sepolia → [UserStorage | NFT Contract | Marketplace] → Blockchain
+                </div>
+                <div class="disclaimer">
+                    ⚠️ <strong>Demo note:</strong> Ethereum Sepolia blockchain data is publicly readable. Do not store passwords, private keys, financial secrets, or sensitive personal information. NFT ownership and transaction history are publicly visible.
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ======== NFT DETAIL MODAL ======== -->
+    <div id="nftModal" class="modal-overlay" hidden>
+        <div class="modal">
+            <button id="modalClose" class="modal-close" aria-label="Close">✕</button>
+            <div class="modal-image-wrap">
+                <img id="modalImage" src="" alt="NFT Image" class="modal-image">
+            </div>
+            <div class="modal-body">
+                <h2 id="modalName" class="modal-title"></h2>
+                <p id="modalDesc" class="modal-desc"></p>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Token ID</span>
+                        <span id="modalTokenId" class="info-value"></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Owner</span>
+                        <code id="modalOwner" class="info-value address"></code>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Creator</span>
+                        <code id="modalCreator" class="info-value address"></code>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Listing Status</span>
+                        <span id="modalListingStatus" class="info-value"></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Price</span>
+                        <span id="modalPrice" class="info-value"></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Contract</span>
+                        <code id="modalContract" class="info-value address"></code>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Metadata URI</span>
+                        <code id="modalMetadataUri" class="info-value address" style="font-size:.72em"></code>
+                    </div>
+                </div>
+                <div id="modalTxStatus" class="tx-status" aria-live="polite" hidden></div>
+                <div id="modalActions" class="form-actions"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======== SELL MODAL ======== -->
+    <div id="sellModal" class="modal-overlay" hidden>
+        <div class="modal modal--sm">
+            <button id="sellModalClose" class="modal-close" aria-label="Close">✕</button>
+            <h2 class="modal-title">💰 List NFT for Sale</h2>
+            <div class="form-group">
+                <label for="sellPriceInput" class="form-label">Sale Price (SepoliaETH)</label>
+                <input type="number" id="sellPriceInput" class="form-input" placeholder="0.01" step="0.0001" min="0.0001">
+                <span id="sellPriceError" class="form-error" role="alert" hidden></span>
+            </div>
+            <div id="sellTxStatus" class="tx-status" aria-live="polite" hidden></div>
+            <div class="form-actions">
+                <button type="button" id="sellConfirmBtn" class="btn btn--primary btn--lg">List on Marketplace</button>
+            </div>
+            <div class="form-hints"><small>💡 You may need to approve the marketplace first (separate transaction).</small></div>
+        </div>
+    </div>
+
+    <!-- ======== TRANSFER MODAL ======== -->
+    <div id="transferModal" class="modal-overlay" hidden>
+        <div class="modal modal--sm">
+            <button id="transferModalClose" class="modal-close" aria-label="Close">✕</button>
+            <h2 class="modal-title">📤 Transfer NFT</h2>
+            <div class="form-group">
+                <label for="transferAddressInput" class="form-label">Recipient Wallet Address</label>
+                <input type="text" id="transferAddressInput" class="form-input" placeholder="0x...">
+                <span id="transferAddressError" class="form-error" role="alert" hidden></span>
+            </div>
+            <div id="transferTxStatus" class="tx-status" aria-live="polite" hidden></div>
+            <div class="form-actions">
+                <button type="button" id="transferConfirmBtn" class="btn btn--primary btn--lg">Transfer NFT</button>
+            </div>
+            <div class="form-hints"><small>⚠️ Transfers are irreversible. Double-check the recipient address.</small></div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>Blockchain Identity & NFT Marketplace — a real decentralized application on Ethereum Sepolia.</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
