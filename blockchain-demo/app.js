@@ -1,54 +1,13 @@
 // ============================================================
-// BLOCKCHAIN IDENTITY & NFT MARKETPLACE — app.js
-// ============================================================
-//
-// Architecture:  Website → ethers.js → MetaMask → Ethereum Sepolia
-//
-// This single file powers:
-//   • Blockchain Identity  (UserStorage contract)
-//   • NFT Minting          (BlockchainIdentityNFT contract — ERC-721)
-//   • NFT Marketplace      (NFTMarketplace contract)
-//
-// Key Web3 concepts:
-//   • PROVIDER  – read-only connection to the blockchain.
-//   • SIGNER    – backed by MetaMask; signs transactions.
-//                 Private key NEVER leaves MetaMask.
-//   • CONTRACT  – JS wrapper around a deployed smart contract.
-//   • READ calls (view/pure) are FREE — no gas, no MetaMask popup.
-//   • WRITE calls create real transactions — require gas + confirmation.
-//
-// What is an NFT?
-//   A Non-Fungible Token is a unique digital asset on the blockchain.
-//   Each has a unique token ID and owner tracked by the ERC-721 contract.
-//
-// What is ERC-721?
-//   The Ethereum standard for NFTs.  Defines ownerOf(), transferFrom(),
-//   approve(), tokenURI(), etc.
-//
-// What is IPFS?
-//   InterPlanetary File System — a decentralised storage network.
-//   NFT images/metadata can be stored on IPFS and referenced by URI.
-//
-// What is a transaction receipt?
-//   After a transaction is mined, the receipt contains the block number,
-//   gas used, status, and event logs.
-//
-// Why localStorage is NOT blockchain storage:
-//   localStorage is browser-local and ephemeral.  The blockchain is a
-//   permanent, globally-shared ledger.  This DApp uses the blockchain
-//   as the sole source of truth.
+// BLOCKCHAIN IDENTITY & NFT MARKETPLACE — MODERN WEB3 ENGINE
+// Decentralized on Ethereum Sepolia (Chain ID: 11155111)
+// Ethers.js v6 · MetaMask · ERC-721 · Hardhat
 // ============================================================
 
-
 // ============================================================
-// 1. CONFIGURATION
+// 1. CONFIGURATION & CONTRACT ADDRESSES
 // ============================================================
 
-/**
- * CONTRACTS Configuration
- * Decentralized contracts on Ethereum Sepolia (Chain ID: 11155111).
- * Identity is pre-deployed; NFT & Marketplace are populated after deployment.
- */
 const CONTRACTS = {
     sepolia: {
         identity:    "0x33F5422Dc7fca52D844a8e382A885C6832E72E60",
@@ -57,30 +16,29 @@ const CONTRACTS = {
     }
 };
 
-// Contract Address References
-const USER_STORAGE_ADDRESS = CONTRACTS.sepolia.identity;
-const CONTRACT_ADDRESS     = USER_STORAGE_ADDRESS; // Backward-compatibility alias
-const NFT_CONTRACT_ADDRESS = CONTRACTS.sepolia.nft;
-const MARKETPLACE_ADDRESS  = CONTRACTS.sepolia.marketplace;
+const SEPOLIA_DEPLOYMENT_BLOCK = 11653150;
+const USER_STORAGE_ADDRESS     = CONTRACTS.sepolia.identity;
+const CONTRACT_ADDRESS         = USER_STORAGE_ADDRESS; // Backward-compatibility alias
+const NFT_CONTRACT_ADDRESS     = CONTRACTS.sepolia.nft;
+const MARKETPLACE_ADDRESS      = CONTRACTS.sepolia.marketplace;
+
+const SEPOLIA_CHAIN_ID         = "11155111";
+const SEPOLIA_CHAIN_ID_HEX     = "0xaa36a7";
+const ETHERSCAN_BASE_URL       = "https://sepolia.etherscan.io";
+const IPFS_GATEWAY             = "https://ipfs.io/ipfs/";
+const ZERO_ADDRESS             = "0x0000000000000000000000000000000000000000";
 
 // ============================================================
-// CONTRACT ABIs — Separate, strongly-typed ABIs for each contract
+// 2. CONTRACT ABIs
 // ============================================================
 
-/**
- * 1. UserStorage Contract ABI (Ethereum Sepolia: 0x33F5422Dc7fca52D844a8e382A885C6832E72E60)
- */
 const USER_STORAGE_ABI = [
     "function storeUser(string memory _name, string memory _role) public",
     "function getUser(address _user) public view returns (string memory, string memory)",
     "event UserStored(address indexed user, string name, string role)"
 ];
-const CONTRACT_ABI = USER_STORAGE_ABI; // Backward-compatibility alias
+const CONTRACT_ABI = USER_STORAGE_ABI;
 
-/**
- * 2. BlockchainIdentityNFT Contract ABI (ERC-721 + ERC721URIStorage)
- * Generated from contracts/BlockchainIdentityNFT.sol compilation artifact
- */
 const NFT_ABI = [
     "function name() public view returns (string)",
     "function symbol() public view returns (string)",
@@ -93,20 +51,14 @@ const NFT_ABI = [
     "function isApprovedForAll(address owner, address operator) public view returns (bool)",
     "function approve(address to, uint256 tokenId) public",
     "function setApprovalForAll(address operator, bool approved) public",
-    "function safeTransferFrom(address from, address to, uint256 tokenId) public",
     "function transferFrom(address from, address to, uint256 tokenId) public",
+    "function safeTransferFrom(address from, address to, uint256 tokenId) public",
     "function balanceOf(address owner) public view returns (uint256)",
-    "function supportsInterface(bytes4 interfaceId) public view returns (bool)",
     "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
     "event NFTMinted(address indexed creator, uint256 indexed tokenId, string tokenURI)",
-    "event Approval(address indexed owner, address indexed approved, uint256 indexed tokenId)",
-    "event ApprovalForAll(address indexed owner, address indexed operator, bool approved)"
+    "event Approval(address indexed owner, address indexed approved, uint256 indexed tokenId)"
 ];
 
-/**
- * 3. NFTMarketplace Contract ABI
- * Generated from contracts/NFTMarketplace.sol compilation artifact
- */
 const MARKETPLACE_ABI = [
     "function listNFT(address nftContract, uint256 tokenId, uint256 price) external",
     "function cancelListing(address nftContract, uint256 tokenId) external",
@@ -118,186 +70,216 @@ const MARKETPLACE_ABI = [
     "event ListingCancelled(address indexed nftContract, uint256 indexed tokenId, address indexed seller)"
 ];
 
-const SEPOLIA_CHAIN_ID     = "11155111";
-const SEPOLIA_CHAIN_ID_HEX = "0xaa36a7";
-const ETHERSCAN_BASE_URL   = "https://sepolia.etherscan.io";
-const IPFS_GATEWAY         = "https://ipfs.io/ipfs/";
-const MAX_INPUT_LENGTH     = 100;
-const ZERO_ADDRESS         = "0x0000000000000000000000000000000000000000";
-
-
 // ============================================================
-// 2. DOM REFERENCES
+// 3. DOM ELEMENT REFERENCES
 // ============================================================
-
-const dom = {
-    connectBtn:       el("connectBtn"),
-    networkBadge:     el("networkBadge"),
-    noMetamaskCard:   el("noMetamaskCard"),
-    wrongNetworkCard: el("wrongNetworkCard"),
-    switchNetworkBtn: el("switchNetworkBtn"),
-    setupCard:        el("setupCard"),
-    mainNav:          el("mainNav"),
-    welcomeCard:      el("welcomeCard"),
-    welcomeConnectBtn:el("welcomeConnectBtn"),
-    // Wallet
-    walletCard:       el("walletCard"),
-    walletShort:      el("walletShort"),
-    walletNetwork:    el("walletNetwork"),
-    walletBalance:    el("walletBalance"),
-    copyAddressBtn:   el("copyAddressBtn"),
-    copyFeedback:     el("copyFeedback"),
-    statNftsOwned:    el("statNftsOwned"),
-    // Dashboard
-    identityPreview:  el("identityPreview"),
-    identityPreviewText: el("identityPreviewText"),
-    nftStatsCard:     el("nftStatsCard"),
-    statTotalMinted:  el("statTotalMinted"),
-    statMyNfts:       el("statMyNfts"),
-    statListedCount:  el("statListedCount"),
-    refreshAllBtn:    el("refreshAllBtn"),
-    // Identity
-    identityCard:     el("identityCard"),
-    identityLoading:  el("identityLoading"),
-    identityEmpty:    el("identityEmpty"),
-    identityData:     el("identityData"),
-    displayName:      el("displayName"),
-    displayRole:      el("displayRole"),
-    displayWallet:    el("displayWallet"),
-    refreshBtn:       el("refreshBtn"),
-    formCard:         el("formCard"),
-    formTitle:        el("formTitle"),
-    storeForm:        el("storeForm"),
-    inputName:        el("inputName"),
-    inputRole:        el("inputRole"),
-    nameError:        el("nameError"),
-    roleError:        el("roleError"),
-    submitBtn:        el("submitBtn"),
-    txCard:           el("txCard"),
-    txStatus:         el("txStatus"),
-    txDetails:        el("txDetails"),
-    txHash:           el("txHash"),
-    txBlock:          el("txBlock"),
-    txResult:         el("txResult"),
-    txActions:        el("txActions"),
-    etherscanTxLink:  el("etherscanTxLink"),
-    detailsCard:      el("detailsCard"),
-    copyContractBtn:  el("copyContractBtn"),
-    nftContractDisplay: el("nftContractDisplay"),
-    marketplaceContractDisplay: el("marketplaceContractDisplay"),
-    copyNftContractBtn: el("copyNftContractBtn"),
-    copyMarketplaceBtn: el("copyMarketplaceBtn"),
-    debugWalletStatus:  el("debugWalletStatus"),
-    debugNetworkStatus: el("debugNetworkStatus"),
-    debugIdentityStatus:el("debugIdentityStatus"),
-    debugNftStatus:     el("debugNftStatus"),
-    debugMarketStatus:  el("debugMarketStatus"),
-    nftExplorerLinkWrap:el("nftExplorerLinkWrap"),
-    nftExplorerLink:    el("nftExplorerLink"),
-    marketExplorerLinkWrap: el("marketExplorerLinkWrap"),
-    marketExplorerLink: el("marketExplorerLink"),
-    // Create NFT
-    modeAutoBtn:      el("modeAutoBtn"),
-    modeManualBtn:    el("modeManualBtn"),
-    autoMetadataFields: el("autoMetadataFields"),
-    manualMetadataFields: el("manualMetadataFields"),
-    nftNameInput:     el("nftNameInput"),
-    nftDescInput:     el("nftDescInput"),
-    nftImageInput:    el("nftImageInput"),
-    nftCategoryInput: el("nftCategoryInput"),
-    nftNameError:     el("nftNameError"),
-    nftDescError:     el("nftDescError"),
-    nftImageError:    el("nftImageError"),
-    manualUriInput:   el("manualUriInput"),
-    manualUriError:   el("manualUriError"),
-    mintBtn:          el("mintBtn"),
-    mintTxCard:       el("mintTxCard"),
-    mintTxStatus:     el("mintTxStatus"),
-    mintTxDetails:    el("mintTxDetails"),
-    mintTokenId:      el("mintTokenId"),
-    mintTxHash:       el("mintTxHash"),
-    mintTxBlock:      el("mintTxBlock"),
-    mintTxResult:     el("mintTxResult"),
-    mintTxActions:    el("mintTxActions"),
-    mintEtherscanLink:el("mintEtherscanLink"),
-    // My NFTs
-    myNftsLoading:    el("myNftsLoading"),
-    myNftsEmpty:      el("myNftsEmpty"),
-    myNftsGrid:       el("myNftsGrid"),
-    refreshMyNftsBtn: el("refreshMyNftsBtn"),
-    // Marketplace
-    marketLoading:    el("marketLoading"),
-    marketEmpty:      el("marketEmpty"),
-    marketGrid:       el("marketGrid"),
-    refreshMarketBtn: el("refreshMarketBtn"),
-    // Activity
-    activityLoading:  el("activityLoading"),
-    activityEmpty:    el("activityEmpty"),
-    activityBody:     el("activityBody"),
-    activityTableBody:el("activityTableBody"),
-    refreshActivityBtn:el("refreshActivityBtn"),
-    // NFT Detail Modal
-    nftModal:         el("nftModal"),
-    modalClose:       el("modalClose"),
-    modalImage:       el("modalImage"),
-    modalName:        el("modalName"),
-    modalDesc:        el("modalDesc"),
-    modalTokenId:     el("modalTokenId"),
-    modalOwner:       el("modalOwner"),
-    modalCreator:     el("modalCreator"),
-    modalListingStatus:el("modalListingStatus"),
-    modalPrice:       el("modalPrice"),
-    modalContract:    el("modalContract"),
-    modalMetadataUri: el("modalMetadataUri"),
-    modalTxStatus:    el("modalTxStatus"),
-    modalActions:     el("modalActions"),
-    // Sell Modal
-    sellModal:        el("sellModal"),
-    sellModalClose:   el("sellModalClose"),
-    sellPriceInput:   el("sellPriceInput"),
-    sellPriceError:   el("sellPriceError"),
-    sellTxStatus:     el("sellTxStatus"),
-    sellConfirmBtn:   el("sellConfirmBtn"),
-    // Transfer Modal
-    transferModal:    el("transferModal"),
-    transferModalClose:el("transferModalClose"),
-    transferAddressInput:el("transferAddressInput"),
-    transferAddressError:el("transferAddressError"),
-    transferTxStatus: el("transferTxStatus"),
-    transferConfirmBtn:el("transferConfirmBtn"),
-};
 
 function el(id) { return document.getElementById(id); }
 
+const dom = {
+    // Header & Nav
+    logoLink:                  el("logoLink"),
+    mainNav:                   el("mainNav"),
+    connectBtn:                el("connectBtn"),
+    connectBtnText:            el("connectBtnText"),
+    networkBadge:              el("networkBadge"),
+    networkDot:                el("networkDot"),
+    networkName:               el("networkName"),
+    mobileNavToggle:           el("mobileNavToggle"),
+    
+    // Wallet Drawer
+    walletDrawer:              el("walletDrawer"),
+    closeWalletDrawer:         el("closeWalletDrawer"),
+    drawerWalletAddress:       el("drawerWalletAddress"),
+    drawerCopyBtn:             el("drawerCopyBtn"),
+    drawerBalance:             el("drawerBalance"),
+    drawerEtherscanLink:       el("drawerEtherscanLink"),
+    disconnectBtn:             el("disconnectBtn"),
+
+    // Warnings & Setup
+    noMetamaskCard:            el("noMetamaskCard"),
+    wrongNetworkCard:          el("wrongNetworkCard"),
+    switchNetworkBtn:          el("switchNetworkBtn"),
+    setupCard:                 el("setupCard"),
+    setupCardTitle:            el("setupCardTitle"),
+    setupCardMessage:          el("setupCardMessage"),
+
+    // Explore / Home
+    statExploreTotalMinted:    el("statExploreTotalMinted"),
+    statExploreListed:         el("statExploreListed"),
+    statExploreVolume:         el("statExploreVolume"),
+    statExploreCreators:       el("statExploreCreators"),
+    exploreFeaturedGrid:       el("exploreFeaturedGrid"),
+
+    // Marketplace
+    marketSearchInput:         el("marketSearchInput"),
+    marketSortSelect:          el("marketSortSelect"),
+    marketLoading:             el("marketLoading"),
+    marketEmpty:               el("marketEmpty"),
+    marketGrid:                el("marketGrid"),
+
+    // Create Studio & Live Preview
+    previewNftCard:            el("previewNftCard"),
+    previewImg:                el("previewImg"),
+    previewBadge:              el("previewBadge"),
+    previewCategory:           el("previewCategory"),
+    previewTitle:              el("previewTitle"),
+    previewTokenId:            el("previewTokenId"),
+    previewDesc:               el("previewDesc"),
+    previewPrice:              el("previewPrice"),
+    modeAutoBtn:               el("modeAutoBtn"),
+    modeManualBtn:             el("modeManualBtn"),
+    autoMetadataFields:        el("autoMetadataFields"),
+    manualMetadataFields:      el("manualMetadataFields"),
+    nftNameInput:              el("nftNameInput"),
+    nftDescInput:              el("nftDescInput"),
+    nftImageInput:             el("nftImageInput"),
+    nftCategoryInput:          el("nftCategoryInput"),
+    nftInitialPriceInput:      el("nftInitialPriceInput"),
+    nftNameError:              el("nftNameError"),
+    nftDescError:              el("nftDescError"),
+    nftImageError:             el("nftImageError"),
+    manualUriInput:            el("manualUriInput"),
+    manualUriError:            el("manualUriError"),
+    mintBtn:                   el("mintBtn"),
+    mintTxCard:                el("mintTxCard"),
+    mintTxStatus:              el("mintTxStatus"),
+    mintTxDetails:             el("mintTxDetails"),
+    mintTokenId:               el("mintTokenId"),
+    mintTxHash:                el("mintTxHash"),
+    mintTxBlock:               el("mintTxBlock"),
+    mintTxActions:             el("mintTxActions"),
+    mintEtherscanLink:         el("mintEtherscanLink"),
+    step1Node:                 el("step1Node"),
+    step2Node:                 el("step2Node"),
+    step3Node:                 el("step3Node"),
+    sampleArt1:                el("sampleArt1"),
+    sampleArt2:                el("sampleArt2"),
+    sampleArt3:                el("sampleArt3"),
+
+    // Portfolio (My NFTs)
+    portfolioWalletAddr:       el("portfolioWalletAddr"),
+    portStatOwned:             el("portStatOwned"),
+    portStatCreated:           el("portStatCreated"),
+    portStatListed:            el("portStatListed"),
+    refreshMyNftsBtn:          el("refreshMyNftsBtn"),
+    myNftsLoading:             el("myNftsLoading"),
+    myNftsEmpty:               el("myNftsEmpty"),
+    myNftsGrid:                el("myNftsGrid"),
+
+    // Identity
+    identityLoading:           el("identityLoading"),
+    identityEmpty:             el("identityEmpty"),
+    identityData:              el("identityData"),
+    displayName:               el("displayName"),
+    displayRole:               el("displayRole"),
+    displayWallet:             el("displayWallet"),
+    refreshBtn:                el("refreshBtn"),
+    storeForm:                 el("storeForm"),
+    inputName:                 el("inputName"),
+    inputRole:                 el("inputRole"),
+    nameError:                 el("nameError"),
+    roleError:                 el("roleError"),
+    submitBtn:                 el("submitBtn"),
+    txCard:                    el("txCard"),
+    txStatus:                  el("txStatus"),
+    txDetails:                 el("txDetails"),
+    txHash:                    el("txHash"),
+    txBlock:                   el("txBlock"),
+    txResult:                  el("txResult"),
+    txActions:                 el("txActions"),
+    etherscanTxLink:           el("etherscanTxLink"),
+    copyContractBtn:           el("copyContractBtn"),
+    nftContractDisplay:        el("nftContractDisplay"),
+    marketplaceContractDisplay:el("marketplaceContractDisplay"),
+    copyNftContractBtn:        el("copyNftContractBtn"),
+    copyMarketplaceBtn:        el("copyMarketplaceBtn"),
+
+    // Activity Feed
+    refreshActivityBtn:        el("refreshActivityBtn"),
+    actStatTotal:              el("actStatTotal"),
+    actStatMints:              el("actStatMints"),
+    actStatListings:           el("actStatListings"),
+    actStatSales:              el("actStatSales"),
+    activityLoading:           el("activityLoading"),
+    activityEmpty:             el("activityEmpty"),
+    activityBody:              el("activityBody"),
+    activityTableBody:         el("activityTableBody"),
+
+    // Detail Modal
+    nftModal:                  el("nftModal"),
+    modalClose:                el("modalClose"),
+    modalImage:                el("modalImage"),
+    modalCategory:             el("modalCategory"),
+    modalName:                 el("modalName"),
+    modalTokenId:              el("modalTokenId"),
+    modalDesc:                 el("modalDesc"),
+    modalOwner:                el("modalOwner"),
+    modalCreator:              el("modalCreator"),
+    modalListingStatus:        el("modalListingStatus"),
+    modalPrice:                el("modalPrice"),
+    modalContract:             el("modalContract"),
+    modalMetadataUri:          el("modalMetadataUri"),
+    modalTxStatus:             el("modalTxStatus"),
+    modalActions:              el("modalActions"),
+
+    // Sell Modal
+    sellModal:                 el("sellModal"),
+    sellModalClose:            el("sellModalClose"),
+    sellPriceInput:            el("sellPriceInput"),
+    sellPriceError:            el("sellPriceError"),
+    sellTxStatus:              el("sellTxStatus"),
+    sellConfirmBtn:            el("sellConfirmBtn"),
+
+    // Transfer Modal
+    transferModal:             el("transferModal"),
+    transferModalClose:        el("transferModalClose"),
+    transferAddressInput:      el("transferAddressInput"),
+    transferAddressError:      el("transferAddressError"),
+    transferTxStatus:          el("transferTxStatus"),
+    transferConfirmBtn:        el("transferConfirmBtn"),
+
+    // Toast
+    toastContainer:            el("toastContainer")
+};
 
 // ============================================================
-// 3. GLOBAL STATE
+// 4. GLOBAL APPLICATION STATE
 // ============================================================
 
-let currentAccount    = null;
-let provider          = null;
-let signer            = null;
-let contract          = null;   // UserStorage (read)
-let nftContract       = null;   // BlockchainIdentityNFT (read)
-let nftContractWrite  = null;   // NFT (write via signer)
-let marketContract    = null;   // NFTMarketplace (read)
-let marketContractWrite = null; // Marketplace (write via signer)
-let currentChainId    = null;
-let metadataMode      = "auto"; // "auto" | "manual"
-let activeModalTokenId = null;  // token ID shown in detail modal
-let activeModalNft     = null;  // cached NFT data for active modal
+let currentAccount       = null;
+let provider             = null;
+let signer               = null;
+let contract             = null;   // UserStorage (read)
+let nftContract          = null;   // BlockchainIdentityNFT (read)
+let nftContractWrite     = null;   // NFT (write)
+let marketContract       = null;   // NFTMarketplace (read)
+let marketContractWrite  = null;   // Marketplace (write)
+let currentChainId       = null;
+let metadataMode         = "auto";
 
-// Idempotent lifecycle & polling state
+// Cached Data Collections
+let allTokensCache       = [];     // Array of fully hydrated NFT objects
+let allActivityEvents    = [];     // Raw and normalized blockchain events
+let blockTimeCache       = new Map();
+let nftMetadataCache     = new Map();
+
+// Active Filters & UI State
+let activeTab            = "explore";
+let currentMarketFilter  = "all";
+let currentMarketSort    = "newest";
+let currentPortfolioFilter = "owned";
+let currentActFilter     = "all";
+let activeModalTokenId   = null;
+
 let isMetaMaskListenersRegistered = false;
 let isConnecting                  = false;
-let isInitialized                 = false;
-let accountsPollInterval          = null;
-let chainPollInterval             = null;
+let isFutureListenersAttached     = false;
 
-/**
- * Singleton BrowserProvider — prevents creating multiple provider instances
- * that attach redundant EventEmitter stream listeners to window.ethereum.
- */
+// ============================================================
+// 5. PROVIDER & SIGNER SINGLETON
+// ============================================================
+
 function getProvider() {
     if (!provider && window.ethereum) {
         provider = new ethers.BrowserProvider(window.ethereum);
@@ -305,9 +287,6 @@ function getProvider() {
     return provider;
 }
 
-/**
- * Derives or refreshes the JsonRpcSigner from the singleton provider.
- */
 async function getSigner() {
     const p = getProvider();
     if (!p) throw new Error("MetaMask is not available.");
@@ -315,14 +294,28 @@ async function getSigner() {
     return signer;
 }
 
+// Fallback high-availability RPC for background data queries when MetaMask is busy
+function getReadOnlyRpcProvider() {
+    return new ethers.JsonRpcProvider("https://ethereum-sepolia-rpc.publicnode.com");
+}
 
 // ============================================================
-// 4. HELPERS
+// 6. UTILITY FUNCTIONS
 // ============================================================
 
 function shortenAddress(addr) {
     if (!addr) return "—";
     return addr.slice(0, 6) + "…" + addr.slice(-4);
+}
+
+function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
 }
 
 function ipfsToHttp(uri) {
@@ -343,335 +336,208 @@ function nftContractsConfigured() {
     );
 }
 
-/**
- * Granular Startup & Setup Diagnostic Check
- * Validates connection, network, and contract reachability on Ethereum Sepolia,
- * and updates developer-friendly connection badges.
- */
-async function checkContractSetup() {
-    // Update Wallet debug status
-    if (dom.debugWalletStatus) {
-        dom.debugWalletStatus.textContent = currentAccount ? `Wallet: ${shortenAddress(currentAccount)}` : "Wallet: Disconnected";
-        dom.debugWalletStatus.className = currentAccount ? "badge badge--success" : "badge badge--offline";
-    }
-
-    // Update Network debug status
-    if (dom.debugNetworkStatus) {
-        if (!currentAccount) {
-            dom.debugNetworkStatus.textContent = "Network: Disconnected";
-            dom.debugNetworkStatus.className = "badge badge--offline";
-        } else if (isSepoliaActive()) {
-            dom.debugNetworkStatus.textContent = "Network: Sepolia (11155111)";
-            dom.debugNetworkStatus.className = "badge badge--success";
-        } else {
-            dom.debugNetworkStatus.textContent = `Network: Wrong (${currentChainId || "?"})`;
-            dom.debugNetworkStatus.className = "badge badge--danger";
-        }
-    }
-
-    // Identity is always configured
-    if (dom.debugIdentityStatus) {
-        dom.debugIdentityStatus.textContent = "Identity: Connected ✓";
-        dom.debugIdentityStatus.className = "badge badge--success";
-    }
-
-    // 1. Is wallet connected?
-    if (!currentAccount) {
-        if (nftContractsConfigured()) {
-            if (dom.debugNftStatus) { dom.debugNftStatus.textContent = "NFT: Configured (Sepolia) ✓"; dom.debugNftStatus.className = "badge badge--success"; }
-            if (dom.debugMarketStatus) { dom.debugMarketStatus.textContent = "Marketplace: Configured (Sepolia) ✓"; dom.debugMarketStatus.className = "badge badge--success"; }
-            hideSetupNotice();
-            return true;
-        }
-        if (dom.debugNftStatus) { dom.debugNftStatus.textContent = "NFT: Not Configured"; dom.debugNftStatus.className = "badge badge--warning"; }
-        if (dom.debugMarketStatus) { dom.debugMarketStatus.textContent = "Marketplace: Not Configured"; dom.debugMarketStatus.className = "badge badge--warning"; }
-        showSetupNotice(
-            "⚙️ NFT Contracts Setup Required",
-            "The NFT and Marketplace smart contracts have not been deployed yet. Deploy them to Ethereum Sepolia to enable NFT features."
-        );
-        return false;
-    }
-
-    // 2. Is network Sepolia?
-    if (!isSepoliaActive()) {
-        if (dom.debugNftStatus) { dom.debugNftStatus.textContent = "NFT: Wrong Network"; dom.debugNftStatus.className = "badge badge--danger"; }
-        if (dom.debugMarketStatus) { dom.debugMarketStatus.textContent = "Marketplace: Wrong Network"; dom.debugMarketStatus.className = "badge badge--danger"; }
-        showSetupNotice(
-            "🔴 Wrong Network",
-            "Please switch MetaMask to Ethereum Sepolia (Chain ID: 11155111)."
-        );
-        return false;
-    }
-
-    // 3. Is NFT contract address configured?
-    if (!CONTRACTS.sepolia.nft || !ethers.isAddress(CONTRACTS.sepolia.nft)) {
-        if (dom.debugNftStatus) { dom.debugNftStatus.textContent = "NFT: Not Configured"; dom.debugNftStatus.className = "badge badge--warning"; }
-        showSetupNotice(
-            "⚙️ NFT Contract Not Configured",
-            "NFT contract address is not configured. Deploy BlockchainIdentityNFT to Sepolia, then update CONTRACTS.sepolia.nft in app.js."
-        );
-        return false;
-    }
-
-    // 4. Is Marketplace contract address configured?
-    if (!CONTRACTS.sepolia.marketplace || !ethers.isAddress(CONTRACTS.sepolia.marketplace)) {
-        if (dom.debugMarketStatus) { dom.debugMarketStatus.textContent = "Marketplace: Not Configured"; dom.debugMarketStatus.className = "badge badge--warning"; }
-        showSetupNotice(
-            "⚙️ Marketplace Contract Not Configured",
-            "Marketplace contract address is not configured. Deploy NFTMarketplace to Sepolia, then update CONTRACTS.sepolia.marketplace in app.js."
-        );
-        return false;
-    }
-
-    // 5. Can contracts be read on-chain? Verify bytecode on Sepolia
-    try {
-        const p = getProvider();
-        if (p) {
-            const [nftCode, marketCode] = await Promise.all([
-                p.getCode(CONTRACTS.sepolia.nft),
-                p.getCode(CONTRACTS.sepolia.marketplace)
-            ]);
-            if (!nftCode || nftCode === "0x") {
-                if (dom.debugNftStatus) { dom.debugNftStatus.textContent = "NFT: Unreachable on Sepolia"; dom.debugNftStatus.className = "badge badge--danger"; }
-                showSetupNotice(
-                    "⚠️ NFT Contract Not Found",
-                    `NFT contract could not be reached on Sepolia at ${shortenAddress(CONTRACTS.sepolia.nft)}. Please verify this address on Sepolia Etherscan.`
-                );
-                return false;
-            }
-            if (!marketCode || marketCode === "0x") {
-                if (dom.debugMarketStatus) { dom.debugMarketStatus.textContent = "Marketplace: Unreachable on Sepolia"; dom.debugMarketStatus.className = "badge badge--danger"; }
-                showSetupNotice(
-                    "⚠️ Marketplace Contract Not Found",
-                    `Marketplace contract could not be reached on Sepolia at ${shortenAddress(CONTRACTS.sepolia.marketplace)}. Please verify this address on Sepolia Etherscan.`
-                );
-                return false;
-            }
-        }
-    } catch (err) {
-        console.warn("Contract reachability check warning:", err);
-    }
-
-    // All checks passed!
-    if (dom.debugNftStatus) { dom.debugNftStatus.textContent = "NFT: Connected ✓"; dom.debugNftStatus.className = "badge badge--success"; }
-    if (dom.debugMarketStatus) { dom.debugMarketStatus.textContent = "Marketplace: Connected ✓"; dom.debugMarketStatus.className = "badge badge--success"; }
-    if (dom.nftExplorerLinkWrap && dom.nftExplorerLink) {
-        dom.nftExplorerLinkWrap.hidden = false;
-        dom.nftExplorerLink.href = `${ETHERSCAN_BASE_URL}/address/${CONTRACTS.sepolia.nft}`;
-    }
-    if (dom.marketExplorerLinkWrap && dom.marketExplorerLink) {
-        dom.marketExplorerLinkWrap.hidden = false;
-        dom.marketExplorerLink.href = `${ETHERSCAN_BASE_URL}/address/${CONTRACTS.sepolia.marketplace}`;
-    }
-
-    hideSetupNotice();
-    return true;
+function isSepoliaActive() {
+    return currentChainId === SEPOLIA_CHAIN_ID;
 }
 
-function showSetupNotice(title, message) {
-    if (!dom.setupCard) return;
-    dom.setupCard.hidden = false;
-    const titleEl = document.getElementById("setupCardTitle");
-    const msgEl   = document.getElementById("setupCardMessage");
-    if (titleEl) titleEl.textContent = title;
-    if (msgEl)   msgEl.textContent   = message;
+function showToast(msg, icon = "ℹ️") {
+    if (!dom.toastContainer) return;
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.innerHTML = `<span>${icon}</span> <span>${escapeHtml(msg)}</span>`;
+    dom.toastContainer.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(10px)";
+        toast.style.transition = "all 0.3s ease";
+        setTimeout(() => toast.remove(), 300);
+    }, 3200);
 }
 
-function hideSetupNotice() {
-    if (dom.setupCard) dom.setupCard.hidden = true;
-}
-
-function escapeHtml(str) {
-    const d = document.createElement("div");
-    d.textContent = str;
-    return d.innerHTML;
-}
-
-/** Placeholder image SVG for NFTs with broken/missing images */
-const PLACEHOLDER_IMG = "data:image/svg+xml," + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect fill="#1a2235" width="200" height="200"/><text x="100" y="105" text-anchor="middle" fill="#64748b" font-size="14" font-family="sans-serif">No Image</text></svg>'
-);
-
+function showSuccess(msg) { showToast(msg, "✅"); }
+function showError(msg)   { showToast(msg, "⚠️"); }
 
 // ============================================================
-// 5. WALLET CONNECTION
+// 7. INITIALISATION & METAMASK EVENT GUARDS
 // ============================================================
 
-async function connectWallet() {
-    if (!window.ethereum) { showNoMetaMask(); return; }
-    try {
-        dom.connectBtn.disabled = true;
-        dom.connectBtn.textContent = "Connecting…";
-        const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-        if (accounts.length === 0) { showError("No accounts returned."); resetConnectButton(); return; }
-        currentAccount = accounts[0];
-        await postConnection();
-    } catch (err) {
-        handleConnectionError(err);
-        resetConnectButton();
+async function init() {
+    updateContractStaticDisplay();
+    if (!window.ethereum) {
+        showNoMetaMask();
+        loadPublicData();
+        return;
+    }
+    setupMetaMaskEventListeners();
+    await checkNetwork();
+    await autoConnectWallet();
+    loadPublicData();
+}
+
+function updateContractStaticDisplay() {
+    if (dom.nftContractDisplay) {
+        dom.nftContractDisplay.innerHTML = `<a href="${ETHERSCAN_BASE_URL}/address/${CONTRACTS.sepolia.nft}" target="_blank" rel="noopener noreferrer">${CONTRACTS.sepolia.nft} ↗</a>`;
+    }
+    if (dom.marketplaceContractDisplay) {
+        dom.marketplaceContractDisplay.innerHTML = `<a href="${ETHERSCAN_BASE_URL}/address/${CONTRACTS.sepolia.marketplace}" target="_blank" rel="noopener noreferrer">${CONTRACTS.sepolia.marketplace} ↗</a>`;
     }
 }
 
-async function postConnection() {
-    if (isConnecting) return;
-    isConnecting = true;
-    try {
+function setupMetaMaskEventListeners() {
+    if (isMetaMaskListenersRegistered || !window.ethereum) return;
+    isMetaMaskListenersRegistered = true;
+
+    window.ethereum.on("accountsChanged", handleAccountsChanged);
+    window.ethereum.on("chainChanged", handleChainChanged);
+}
+
+function handleAccountsChanged(accounts) {
+    if (accounts.length === 0) {
+        currentAccount = null;
         updateWalletUI();
-        await checkNetwork();
-        if (isSepoliaActive()) {
-            await initializeBlockchain();
-            showConnectedUI();
-            await Promise.all([loadUserData(), loadBalance()]);
-            if (nftContractsConfigured()) {
-                await loadNFTStats();
-                // Pre-load for current tab / all view
-                const tab = document.querySelector(".tab-btn.active")?.dataset.tab;
-                if (tab === "all" || !tab) {
-                    await Promise.allSettled([loadMyNFTs(), loadMarketplace(), loadActivity()]);
-                } else if (tab === "my-nfts") {
-                    await loadMyNFTs();
-                } else if (tab === "marketplace") {
-                    await loadMarketplace();
-                } else if (tab === "activity") {
-                    await loadActivity();
-                }
-            }
-        }
-    } finally {
-        isConnecting = false;
+        showToast("Wallet disconnected", "🔌");
+    } else if (accounts[0] !== currentAccount) {
+        currentAccount = accounts[0];
+        updateWalletUI();
+        showSuccess(`Account changed: ${shortenAddress(currentAccount)}`);
+        postConnection();
     }
 }
 
-function resetConnectButton() {
-    dom.connectBtn.disabled = false;
-    dom.connectBtn.innerHTML = '<span class="btn-icon" aria-hidden="true">🦊</span> Connect Wallet';
+function handleChainChanged(chainIdHex) {
+    currentChainId = parseInt(chainIdHex, 16).toString();
+    updateNetworkBadge();
+    if (isSepoliaActive()) {
+        hideWrongNetwork();
+        initializeBlockchain();
+        postConnection();
+    } else {
+        showWrongNetwork();
+    }
 }
-
-
-// ============================================================
-// 6. NETWORK HANDLING
-// ============================================================
 
 async function checkNetwork() {
-    const hex = await window.ethereum.request({ method: "eth_chainId" });
-    currentChainId = parseInt(hex, 16).toString();
-    updateNetworkBadge();
-    if (!isSepoliaActive()) showWrongNetwork(); else hideWrongNetwork();
+    if (!window.ethereum) return;
+    try {
+        const hex = await window.ethereum.request({ method: "eth_chainId" });
+        currentChainId = parseInt(hex, 16).toString();
+        updateNetworkBadge();
+        if (!isSepoliaActive()) showWrongNetwork(); else hideWrongNetwork();
+    } catch (err) {
+        console.warn("checkNetwork warning:", err);
+    }
 }
 
-function isSepoliaActive() { return currentChainId === SEPOLIA_CHAIN_ID; }
+function updateNetworkBadge() {
+    if (!dom.networkBadge) return;
+    if (isSepoliaActive()) {
+        dom.networkDot.className = "network-dot active";
+        dom.networkName.textContent = "Sepolia (11155111)";
+        dom.networkBadge.className = "network-badge";
+    } else {
+        dom.networkDot.className = "network-dot";
+        dom.networkName.textContent = currentChainId ? `Wrong Network (${currentChainId})` : "Disconnected";
+        dom.networkBadge.className = "network-badge";
+    }
+}
+
+function showNoMetaMask() {
+    if (dom.noMetamaskCard) dom.noMetamaskCard.hidden = false;
+}
+
+function showWrongNetwork() {
+    if (dom.wrongNetworkCard) dom.wrongNetworkCard.hidden = false;
+}
+
+function hideWrongNetwork() {
+    if (dom.wrongNetworkCard) dom.wrongNetworkCard.hidden = true;
+}
 
 async function switchToSepolia() {
     try {
-        await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: SEPOLIA_CHAIN_ID_HEX }] });
+        await window.ethereum.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: SEPOLIA_CHAIN_ID_HEX }]
+        });
     } catch (err) {
         if (err.code === 4902) {
             try {
-                await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{
-                    chainId: SEPOLIA_CHAIN_ID_HEX, chainName: "Ethereum Sepolia",
-                    nativeCurrency: { name: "SepoliaETH", symbol: "SepoliaETH", decimals: 18 },
-                    rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
-                    blockExplorerUrls: [ETHERSCAN_BASE_URL]
-                }] });
+                await window.ethereum.request({
+                    method: "wallet_addEthereumChain",
+                    params: [{
+                        chainId: SEPOLIA_CHAIN_ID_HEX,
+                        chainName: "Ethereum Sepolia",
+                        nativeCurrency: { name: "SepoliaETH", symbol: "SepoliaETH", decimals: 18 },
+                        rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+                        blockExplorerUrls: [ETHERSCAN_BASE_URL]
+                    }]
+                });
             } catch { showError("Could not add Sepolia network."); }
-        } else if (err.code === 4001) { showError("Network switch cancelled."); }
-        else { showError("Could not switch network."); }
-    }
-}
-
-
-// ============================================================
-// 7. PROVIDER & CONTRACT INITIALISATION
-// ============================================================
-
-async function initializeBlockchain() {
-    const p = getProvider();
-    if (!p) return;
-    signer = await getSigner();
-
-    // 1. Initialize UserStorage Contract
-    try {
-        contract = new ethers.Contract(USER_STORAGE_ADDRESS, USER_STORAGE_ABI, p);
-        if (dom.debugIdentityStatus) {
-            dom.debugIdentityStatus.textContent = "Identity: Connected ✓";
-            dom.debugIdentityStatus.className = "badge badge--success";
-        }
-    } catch (err) {
-        console.error("UserStorage initialization error:", err);
-        if (dom.debugIdentityStatus) {
-            dom.debugIdentityStatus.textContent = "Identity: Init Failed";
-            dom.debugIdentityStatus.className = "badge badge--danger";
-        }
-    }
-
-    // 2. Perform setup & diagnostic checks
-    const isSetupValid = await checkContractSetup();
-
-    // 3. Initialize NFT and Marketplace contracts if configured
-    if (isSetupValid) {
-        try {
-            nftContract         = new ethers.Contract(CONTRACTS.sepolia.nft, NFT_ABI, p);
-            nftContractWrite    = new ethers.Contract(CONTRACTS.sepolia.nft, NFT_ABI, signer);
-            marketContract      = new ethers.Contract(CONTRACTS.sepolia.marketplace, MARKETPLACE_ABI, p);
-            marketContractWrite = new ethers.Contract(CONTRACTS.sepolia.marketplace, MARKETPLACE_ABI, signer);
-
-            // Health check: actual view function calls on-chain
-            const [nftName, nftSymbol] = await Promise.all([
-                nftContract.name(),
-                nftContract.symbol()
-            ]);
-            console.log(`✅ Connected to NFT Contract: ${nftName} (${nftSymbol}) at ${CONTRACTS.sepolia.nft}`);
-
-            // Marketplace health check
-            await marketContract.getListing(CONTRACTS.sepolia.nft, 0);
-            console.log(`✅ Connected to NFT Marketplace at ${CONTRACTS.sepolia.marketplace}`);
-
-            if (dom.debugNftStatus) {
-                dom.debugNftStatus.textContent = `NFT: Connected (${nftSymbol}) ✓`;
-                dom.debugNftStatus.className = "badge badge--success";
-            }
-            if (dom.debugMarketStatus) {
-                dom.debugMarketStatus.textContent = "Marketplace: Connected ✓";
-                dom.debugMarketStatus.className = "badge badge--success";
-            }
-
-            if (dom.nftContractDisplay) {
-                dom.nftContractDisplay.innerHTML = `<a href="${ETHERSCAN_BASE_URL}/address/${CONTRACTS.sepolia.nft}" target="_blank" rel="noopener noreferrer" class="link">${CONTRACTS.sepolia.nft} ↗</a>`;
-            }
-            if (dom.marketplaceContractDisplay) {
-                dom.marketplaceContractDisplay.innerHTML = `<a href="${ETHERSCAN_BASE_URL}/address/${CONTRACTS.sepolia.marketplace}" target="_blank" rel="noopener noreferrer" class="link">${CONTRACTS.sepolia.marketplace} ↗</a>`;
-            }
-        } catch (healthErr) {
-            console.warn("Contract health check warning:", healthErr);
-            if (dom.debugNftStatus) {
-                dom.debugNftStatus.textContent = "NFT: Health Check Failed";
-                dom.debugNftStatus.className = "badge badge--danger";
-            }
-        }
-    }
-}
-
-
-// ============================================================
-// 8. IDENTITY — READ
-// ============================================================
-
-async function loadUserData() {
-    if (!contract || !currentAccount || !isSepoliaActive()) return;
-    showIdentityLoading();
-    try {
-        const [name, role] = await contract.getUser(currentAccount);
-        if (name === "" && role === "") {
-            showIdentityEmpty(); setFormMode("create");
-            dom.identityPreviewText.textContent = "No identity stored yet.";
+        } else if (err.code === 4001) {
+            showError("Network switch rejected.");
         } else {
-            showIdentityData(name, role); setFormMode("update", name, role);
-            dom.identityPreviewText.innerHTML = `<strong>${escapeHtml(name)}</strong> — ${escapeHtml(role)}`;
+            showError("Could not switch to Sepolia network.");
+        }
+    }
+}
+
+// ============================================================
+// 8. WALLET CONNECTION
+// ============================================================
+
+async function autoConnectWallet() {
+    try {
+        const accounts = await window.ethereum.request({ method: "eth_accounts" });
+        if (accounts && accounts.length > 0) {
+            currentAccount = accounts[0];
+            await initializeBlockchain();
+            updateWalletUI();
+            postConnection();
         }
     } catch (err) {
-        console.error("loadUserData:", err);
-        showIdentityEmpty(); setFormMode("create");
-        showError("Unable to read identity from the blockchain.");
+        console.warn("Auto-connect check:", err);
+    }
+}
+
+async function connectWallet() {
+    if (isConnecting) return;
+    if (!window.ethereum) { showNoMetaMask(); return; }
+    isConnecting = true;
+    dom.connectBtnText.textContent = "Connecting…";
+    try {
+        const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+        currentAccount = accounts[0];
+        await checkNetwork();
+        if (isSepoliaActive()) {
+            await initializeBlockchain();
+            updateWalletUI();
+            postConnection();
+            showSuccess("Connected to Sepolia!");
+        } else {
+            await switchToSepolia();
+        }
+    } catch (err) {
+        if (err.code === 4001) showError("Connection rejected in MetaMask.");
+        else showError("Failed to connect MetaMask.");
+    } finally {
+        isConnecting = false;
+        updateWalletUI();
+    }
+}
+
+function updateWalletUI() {
+    if (currentAccount) {
+        dom.connectBtn.classList.add("connected");
+        dom.connectBtnText.textContent = shortenAddress(currentAccount);
+        if (dom.portfolioWalletAddr) dom.portfolioWalletAddr.textContent = currentAccount;
+        if (dom.drawerWalletAddress) dom.drawerWalletAddress.textContent = shortenAddress(currentAccount);
+        if (dom.drawerEtherscanLink) dom.drawerEtherscanLink.href = `${ETHERSCAN_BASE_URL}/address/${currentAccount}`;
+        loadBalance();
+    } else {
+        dom.connectBtn.classList.remove("connected");
+        dom.connectBtnText.textContent = "Connect Wallet";
+        if (dom.drawerBalance) dom.drawerBalance.textContent = "—";
+        if (dom.portfolioWalletAddr) dom.portfolioWalletAddr.textContent = "Not connected";
     }
 }
 
@@ -680,423 +546,119 @@ async function loadBalance() {
     if (!p || !currentAccount) return;
     try {
         const wei = await p.getBalance(currentAccount);
-        dom.walletBalance.textContent = parseFloat(ethers.formatEther(wei)).toFixed(4) + " SepoliaETH";
-    } catch { dom.walletBalance.textContent = "—"; }
+        const eth = parseFloat(ethers.formatEther(wei)).toFixed(4);
+        if (dom.drawerBalance) dom.drawerBalance.textContent = `${eth} SepoliaETH`;
+    } catch {
+        if (dom.drawerBalance) dom.drawerBalance.textContent = "—";
+    }
 }
 
-
 // ============================================================
-// 9. IDENTITY — WRITE
+// 9. CONTRACT INITIALISATION & HEALTH CHECK
 // ============================================================
 
-async function storeUserData() {
-    if (!window.ethereum) { showNoMetaMask(); return; }
-    if (!currentAccount) {
-        showError("Please connect your MetaMask wallet first.");
-        await connectWallet();
-        return;
-    }
-    if (!isSepoliaActive()){ showError("Switch to Sepolia."); return; }
-    const name = dom.inputName.value.trim();
-    const role = dom.inputRole.value.trim();
-    if (!validateIdentityInputs(name, role)) return;
+async function initializeBlockchain() {
+    const p = getProvider();
+    if (!p) return;
     try {
-        const s = await getSigner();
-        const wc = new ethers.Contract(USER_STORAGE_ADDRESS, USER_STORAGE_ABI, s);
-        showTxPending("Waiting for wallet confirmation…");
-        dom.submitBtn.disabled = true;
-        dom.submitBtn.textContent = "Waiting for MetaMask…";
-        const tx = await wc.storeUser(name, role);
-        showTxPending("Transaction submitted. Waiting for blockchain confirmation…");
-        dom.submitBtn.textContent = "Mining…";
-        const receipt = await tx.wait();
-        showTxConfirmed(receipt);
-        await loadUserData();
-        await loadBalance();
-        showSuccess("Identity saved to the blockchain!");
-    } catch (err) { handleTransactionError(err); }
-    finally { dom.submitBtn.disabled = false; updateSubmitButtonText(); }
-}
-
-// ============================================================
-// 10. IDENTITY — VALIDATION
-// ============================================================
-
-function validateIdentityInputs(name, role) {
-    let ok = true; clearIdentityErrors();
-    if (!name) { fieldError(dom.inputName, dom.nameError, "Please enter your name."); ok = false; }
-    else if (name.length > MAX_INPUT_LENGTH) { fieldError(dom.inputName, dom.nameError, "Too long."); ok = false; }
-    if (!role) { fieldError(dom.inputRole, dom.roleError, "Please enter your role."); ok = false; }
-    else if (role.length > MAX_INPUT_LENGTH) { fieldError(dom.inputRole, dom.roleError, "Too long."); ok = false; }
-    return ok;
-}
-function fieldError(input, errEl, msg) { input.classList.add("is-invalid"); errEl.textContent = msg; errEl.hidden = false; }
-function clearIdentityErrors() {
-    dom.inputName.classList.remove("is-invalid"); dom.nameError.hidden = true;
-    dom.inputRole.classList.remove("is-invalid"); dom.roleError.hidden = true;
-}
-
-
-// ============================================================
-// 11. TRANSACTION UI (identity)
-// ============================================================
-
-function showTxPending(msg) {
-    dom.txCard.hidden = false; dom.txDetails.hidden = true; dom.txActions.hidden = true;
-    dom.txStatus.className = "tx-status is-pending";
-    dom.txStatus.innerHTML = `<div class="spinner"></div> ${escapeHtml(msg)}`;
-}
-function showTxConfirmed(receipt) {
-    const ok = receipt.status === 1;
-    dom.txStatus.className = "tx-status is-success";
-    dom.txStatus.textContent = ok ? "Transaction confirmed ✓" : "Transaction failed ✗";
-    dom.txHash.textContent = receipt.hash;
-    dom.txBlock.textContent = receipt.blockNumber;
-    dom.txResult.textContent = ok ? "Success" : "Failed";
-    dom.etherscanTxLink.href = `${ETHERSCAN_BASE_URL}/tx/${receipt.hash}`;
-    dom.txDetails.hidden = false; dom.txActions.hidden = false;
-}
-
-
-// ============================================================
-// 12. UI STATE MANAGEMENT
-// ============================================================
-
-function updateWalletUI() {
-    if (!currentAccount) return;
-    dom.walletShort.textContent   = shortenAddress(currentAccount);
-    dom.displayWallet.textContent = shortenAddress(currentAccount);
-    dom.connectBtn.innerHTML      = `<span class="btn-icon">🦊</span> ${shortenAddress(currentAccount)}`;
-    dom.connectBtn.disabled       = true;
-}
-
-function showConnectedUI() {
-    if (dom.welcomeCard) dom.welcomeCard.hidden = true;
-    dom.walletCard.hidden = false;
-    dom.identityPreview.hidden = false;
-    dom.nftStatsCard.hidden = false;
-    dom.wrongNetworkCard.hidden = true;
-    dom.mainNav.hidden = false;
-}
-
-function hideConnectedUI() {
-    if (dom.welcomeCard) dom.welcomeCard.hidden = false;
-    dom.walletCard.hidden = true;
-    dom.identityPreview.hidden = true;
-    dom.nftStatsCard.hidden = true;
-    dom.txCard.hidden = true;
-    dom.mintTxCard.hidden = true;
-}
-
-function showNoMetaMask() { dom.noMetamaskCard.hidden = false; hideConnectedUI(); }
-
-function showWrongNetwork() {
-    dom.wrongNetworkCard.hidden = false;
-    hideConnectedUI();
-    if (currentAccount) { dom.walletCard.hidden = false; }
-}
-function hideWrongNetwork() { dom.wrongNetworkCard.hidden = true; }
-
-function updateNetworkBadge() {
-    if (!currentAccount) { dom.networkBadge.textContent = "Not Connected"; dom.networkBadge.className = "badge badge--offline"; return; }
-    if (isSepoliaActive()) {
-        dom.networkBadge.textContent = "Ethereum Sepolia"; dom.networkBadge.className = "badge badge--success";
-        dom.walletNetwork.textContent = "Ethereum Sepolia";
-    } else {
-        dom.networkBadge.textContent = "Wrong Network"; dom.networkBadge.className = "badge badge--danger";
-        dom.walletNetwork.textContent = "Wrong Network";
-    }
-}
-
-function showIdentityLoading() { dom.identityLoading.hidden = false; dom.identityEmpty.hidden = true; dom.identityData.hidden = true; }
-function showIdentityEmpty()   { dom.identityLoading.hidden = true;  dom.identityEmpty.hidden = false; dom.identityData.hidden = true; }
-function showIdentityData(name, role) {
-    dom.identityLoading.hidden = true; dom.identityEmpty.hidden = true; dom.identityData.hidden = false;
-    dom.displayName.textContent = name; dom.displayRole.textContent = role;
-}
-
-function setFormMode(mode, name, role) {
-    if (mode === "update") {
-        dom.formTitle.textContent = "📝 Update Information on Blockchain";
-        dom.inputName.value = name || ""; dom.inputRole.value = role || "";
-    } else {
-        dom.formTitle.textContent = "📝 Store Information on Blockchain";
-        dom.inputName.value = ""; dom.inputRole.value = "";
-    }
-    updateSubmitButtonText();
-}
-function updateSubmitButtonText() {
-    const has = dom.displayName.textContent !== "" && !dom.identityData.hidden;
-    dom.submitBtn.textContent = has ? "Update on Blockchain" : "Save to Blockchain";
-}
-
-
-// ============================================================
-// 13. TAB NAVIGATION
-// ============================================================
-
-function switchTab(tabName) {
-    // Update nav buttons
-    document.querySelectorAll(".tab-btn").forEach(b => {
-        b.classList.toggle("active", b.dataset.tab === tabName);
-    });
-    // Update content areas
-    const tabMap = {
-        "dashboard":  "tabDashboard",
-        "identity":   "tabIdentity",
-        "create-nft": "tabCreateNft",
-        "my-nfts":    "tabMyNfts",
-        "marketplace":"tabMarketplace",
-        "activity":   "tabActivity"
-    };
-    document.querySelectorAll(".tab-content").forEach(tc => {
-        tc.classList.toggle("active", tabName === "all" || tc.id === tabMap[tabName]);
-    });
-    // Lazy-load data for NFT tabs
-    if (!nftContractsConfigured() || !currentAccount || !isSepoliaActive()) return;
-    if (tabName === "my-nfts" || tabName === "all") loadMyNFTs();
-    if (tabName === "marketplace" || tabName === "all") loadMarketplace();
-    if (tabName === "activity" || tabName === "all") loadActivity();
-}
-
-
-// ============================================================
-// 14. NFT — MINTING
-// ============================================================
-
-async function mintNFT() {
-    if (!window.ethereum) { showNoMetaMask(); return; }
-    if (!currentAccount) {
-        showError("Please connect your MetaMask wallet first.");
-        await connectWallet();
-        return;
-    }
-    if (!isSepoliaActive()) { showError("Switch to Sepolia first."); return; }
-    if (!nftContractsConfigured()) { showError("NFT contracts are not yet configured. Please deploy them first."); return; }
-
-    let metadataURI;
-    if (metadataMode === "auto") {
-        // Validate auto fields
-        const name = dom.nftNameInput.value.trim();
-        const desc = dom.nftDescInput.value.trim();
-        const img  = dom.nftImageInput.value.trim();
-        const cat  = dom.nftCategoryInput.value.trim();
-        let ok = true;
-        [dom.nftNameError, dom.nftDescError, dom.nftImageError].forEach(e => e.hidden = true);
-        [dom.nftNameInput, dom.nftDescInput, dom.nftImageInput].forEach(i => i.classList.remove("is-invalid"));
-        if (!name) { fieldError(dom.nftNameInput, dom.nftNameError, "NFT name is required."); ok = false; }
-        if (!desc)  { fieldError(dom.nftDescInput, dom.nftDescError, "Description is required."); ok = false; }
-        if (!img)   { fieldError(dom.nftImageInput, dom.nftImageError, "Image URI is required."); ok = false; }
-        if (!ok) return;
-
-        // Build ERC-721 metadata JSON
-        const metadata = {
-            name: name,
-            description: desc,
-            image: img,
-            attributes: [
-                { trait_type: "Creator", value: currentAccount }
-            ]
-        };
-        if (cat) metadata.attributes.push({ trait_type: "Category", value: cat });
-
-        // Encode as data URI (Option A — self-contained, no IPFS dependency)
-        const json = JSON.stringify(metadata);
-        metadataURI = "data:application/json;base64," + btoa(unescape(encodeURIComponent(json)));
-    } else {
-        // Manual mode — user pastes URI
-        const uri = dom.manualUriInput.value.trim();
-        dom.manualUriError.hidden = true;
-        dom.manualUriInput.classList.remove("is-invalid");
-        if (!uri) { fieldError(dom.manualUriInput, dom.manualUriError, "Metadata URI is required."); return; }
-        metadataURI = uri;
-    }
+        signer = await getSigner();
+    } catch {}
 
     try {
-        const s = await getSigner();
-        const wc = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, s);
-
-        // Show mint tx card
-        dom.mintTxCard.hidden = false;
-        dom.mintTxDetails.hidden = true; dom.mintTxActions.hidden = true;
-        dom.mintTxStatus.className = "tx-status is-pending";
-        dom.mintTxStatus.innerHTML = '<div class="spinner"></div> Waiting for MetaMask confirmation…';
-        dom.mintBtn.disabled = true;
-        dom.mintBtn.textContent = "Waiting for MetaMask…";
-
-        const tx = await wc.mintNFT(metadataURI);
-
-        dom.mintTxStatus.innerHTML = '<div class="spinner"></div> Transaction submitted. Waiting for blockchain confirmation…';
-        dom.mintBtn.textContent = "Minting…";
-
-        const receipt = await tx.wait();
-
-        // Extract token ID from NFTMinted event
-        let tokenId = "?";
-        const iface = new ethers.Interface(NFT_ABI);
-        for (const log of receipt.logs) {
-            try {
-                const parsed = iface.parseLog({ topics: log.topics, data: log.data });
-                if (parsed && parsed.name === "NFTMinted") {
-                    tokenId = parsed.args.tokenId.toString();
-                    break;
-                }
-            } catch {}
-        }
-
-        // Show success
-        const ok = receipt.status === 1;
-        dom.mintTxStatus.className = "tx-status is-success";
-        dom.mintTxStatus.textContent = ok ? "NFT Minted Successfully ✓" : "Mint failed ✗";
-        dom.mintTokenId.textContent = "#" + tokenId;
-        dom.mintTxHash.textContent = receipt.hash;
-        dom.mintTxBlock.textContent = receipt.blockNumber;
-        dom.mintTxResult.textContent = ok ? "Success" : "Failed";
-        dom.mintEtherscanLink.href = `${ETHERSCAN_BASE_URL}/tx/${receipt.hash}`;
-        dom.mintTxDetails.hidden = false; dom.mintTxActions.hidden = false;
-
-        // Refresh NFT data
-        const p = getProvider();
-        if (p) nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, p);
-        await loadNFTStats();
-        await loadBalance();
-        showSuccess("NFT minted on the blockchain!");
+        contract = new ethers.Contract(USER_STORAGE_ADDRESS, USER_STORAGE_ABI, p);
     } catch (err) {
-        handleMintError(err);
-    } finally {
-        dom.mintBtn.disabled = !nftContractsConfigured();
-        dom.mintBtn.textContent = "Mint NFT on Blockchain";
+        console.warn("UserStorage init warning:", err);
     }
-}
 
-function handleMintError(err) {
-    console.error("Mint error:", err);
-    dom.mintTxCard.hidden = false;
-    dom.mintTxStatus.className = "tx-status is-error";
-    const code = err.code || err?.info?.error?.code;
-    const msg  = err.message || "";
-    if (code === "ACTION_REJECTED" || code === 4001) dom.mintTxStatus.textContent = "❌ Minting cancelled in MetaMask.";
-    else if (msg.includes("insufficient funds") || msg.includes("INSUFFICIENT_FUNDS")) dom.mintTxStatus.textContent = "❌ Not enough Sepolia ETH for gas.";
-    else dom.mintTxStatus.textContent = "❌ Minting failed. Please try again.";
-    dom.mintTxDetails.hidden = true; dom.mintTxActions.hidden = true;
-}
-
-
-// ============================================================
-// 15. NFT — READING & DISCOVERY
-// ============================================================
-//
-// We do NOT use ERC721Enumerable (expensive on-chain storage).
-// Instead, we discover minted tokens by querying Transfer events
-// where `from == address(0)` (= mint events).  Then we verify
-// current ownership with ownerOf().
-//
-// This is a blockchain event — a log entry created when the
-// smart contract emits an event.  Events are indexed and
-// queryable but don't cost storage gas.
-
-async function loadNFTStats() {
-    if (!nftContract) return;
-    try {
-        const total = await nftContract.totalSupply();
-        dom.statTotalMinted.textContent = total.toString();
-        if (currentAccount) {
-            const bal = await nftContract.balanceOf(currentAccount);
-            dom.statMyNfts.textContent = bal.toString();
-            dom.statNftsOwned.textContent = bal.toString();
-        }
-    } catch (err) { console.error("loadNFTStats:", err); }
-}
-
-async function loadMyNFTs() {
-    if (!nftContract || !currentAccount) return;
-    dom.myNftsLoading.hidden = false; dom.myNftsEmpty.hidden = true; dom.myNftsGrid.hidden = true;
-    dom.myNftsGrid.innerHTML = "";
-    try {
-        const tokenIds = await discoverOwnedTokens(currentAccount);
-        if (tokenIds.length === 0) {
-            dom.myNftsLoading.hidden = true; dom.myNftsEmpty.hidden = false; return;
-        }
-        const nfts = await Promise.all(tokenIds.map(id => getNFTDetails(id)));
-        dom.myNftsLoading.hidden = true; dom.myNftsGrid.hidden = false;
-        nfts.filter(Boolean).forEach(nft => renderNFTCard(nft, dom.myNftsGrid, true));
-    } catch (err) {
-        console.error("loadMyNFTs:", err);
-        dom.myNftsLoading.hidden = true; dom.myNftsEmpty.hidden = false;
-    }
-}
-
-async function discoverOwnedTokens(owner) {
-    const owned = [];
-    const ownerLower = owner.toLowerCase();
-
-    // 1. Direct on-chain check using totalSupply() and ownerOf(id)
-    // BlockchainIdentityNFT mints tokens starting from 0 to totalSupply() - 1.
-    // This is 100% accurate, fast, and immune to public RPC queryFilter block-range limit errors.
-    try {
-        const total = await nftContract.totalSupply();
-        const totalNum = Number(total);
-        if (totalNum <= 200) {
-            const checks = [];
-            for (let i = 0; i < totalNum; i++) {
-                checks.push(
-                    nftContract.ownerOf(i)
-                        .then(o => { if (o.toLowerCase() === ownerLower) owned.push(i); })
-                        .catch(() => {})
-                );
+    if (nftContractsConfigured()) {
+        try {
+            nftContract         = new ethers.Contract(CONTRACTS.sepolia.nft, NFT_ABI, p);
+            marketContract      = new ethers.Contract(CONTRACTS.sepolia.marketplace, MARKETPLACE_ABI, p);
+            if (signer) {
+                nftContractWrite    = new ethers.Contract(CONTRACTS.sepolia.nft, NFT_ABI, signer);
+                marketContractWrite = new ethers.Contract(CONTRACTS.sepolia.marketplace, MARKETPLACE_ABI, signer);
             }
-            await Promise.all(checks);
-            return owned.sort((a, b) => Number(a) - Number(b));
+            if (dom.setupCard) dom.setupCard.hidden = true;
+            attachFutureEventListeners();
+        } catch (err) {
+            console.warn("NFT/Marketplace contract init warning:", err);
         }
-    } catch (err) {
-        console.warn("Direct totalSupply discovery check:", err);
     }
-
-    // 2. Query Transfer events TO owner as fallback
-    try {
-        const filter = nftContract.filters.Transfer(null, owner);
-        const logs = await nftContract.queryFilter(filter);
-        const candidateIds = [...new Set(logs.map(l => l.args.tokenId.toString()))];
-        for (const id of candidateIds) {
-            try {
-                const o = await nftContract.ownerOf(id);
-                if (o.toLowerCase() === ownerLower && !owned.includes(id)) owned.push(id);
-            } catch {}
-        }
-    } catch (err) {
-        console.warn("Event query error in discoverOwnedTokens:", err);
-    }
-    return owned.sort((a, b) => Number(a) - Number(b));
 }
 
-async function getNFTDetails(tokenId) {
-    try {
-        const [owner, uri, creator] = await Promise.all([
-            nftContract.ownerOf(tokenId),
-            nftContract.tokenURI(tokenId),
-            nftContract.tokenCreators(tokenId)
-        ]);
-        const metadata = await fetchMetadata(uri);
-        let listing = { active: false, price: 0n, seller: ZERO_ADDRESS };
-        if (marketContract) {
-            try {
-                const [s, p, a] = await marketContract.getListing(NFT_CONTRACT_ADDRESS, tokenId);
-                listing = { seller: s, price: p, active: a };
-            } catch {}
+// ============================================================
+// 10. SAFE HISTORICAL EVENT QUERYING (NO BLOCK 0 CRASHES)
+// ============================================================
+
+/**
+ * Safely fetches historical logs in safe chunks starting from SEPOLIA_DEPLOYMENT_BLOCK.
+ * Avoids the "exceed maximum block range: 50000" RPC error on Sepolia.
+ */
+async function getLogsInChunks(targetContract, filter, fromBlock = SEPOLIA_DEPLOYMENT_BLOCK, toBlock = "latest", chunkSize = 25000) {
+    if (!targetContract) return [];
+    const p = targetContract.runner?.provider || getProvider() || getReadOnlyRpcProvider();
+    let currentLatest = toBlock;
+    if (toBlock === "latest" && p) {
+        try { currentLatest = await p.getBlockNumber(); } catch { currentLatest = 11654000; }
+    }
+    const endBlock = Number(currentLatest);
+    const startBlock = Number(fromBlock);
+    if (isNaN(startBlock) || isNaN(endBlock) || startBlock > endBlock) return [];
+
+    // If block range is small enough, query directly in 1 fast call
+    if (endBlock - startBlock <= 30000) {
+        try {
+            return await targetContract.queryFilter(filter, startBlock, endBlock);
+        } catch (err) {
+            console.warn("Single chunk queryFilter failed, falling back to split chunks:", err);
         }
-        return {
-            tokenId: tokenId.toString(),
-            owner, creator, uri,
-            name: metadata?.name || `BINFT #${tokenId}`,
-            description: metadata?.description || "",
-            image: metadata?.image || "",
-            attributes: metadata?.attributes || [],
-            listing
-        };
-    } catch (err) { console.error(`getNFTDetails(${tokenId}):`, err); return null; }
+    }
+
+    const logs = [];
+    for (let b = startBlock; b <= endBlock; b += chunkSize) {
+        const chunkTo = Math.min(b + chunkSize - 1, endBlock);
+        try {
+            const chunkLogs = await targetContract.queryFilter(filter, b, chunkTo);
+            logs.push(...chunkLogs);
+        } catch (err) {
+            console.warn(`Query logs chunk [${b}..${chunkTo}] warning:`, err);
+        }
+    }
+    return logs;
 }
+
+// Cached block timestamp loader to avoid duplicate RPC calls
+async function getBlockTimestamp(blockNumber) {
+    if (blockTimeCache.has(blockNumber)) return blockTimeCache.get(blockNumber);
+    try {
+        const p = getProvider() || getReadOnlyRpcProvider();
+        const block = await p.getBlock(blockNumber);
+        if (block && block.timestamp) {
+            blockTimeCache.set(blockNumber, block.timestamp);
+            return block.timestamp;
+        }
+    } catch {}
+    return null;
+}
+
+function formatTimeAgo(timestampSeconds) {
+    if (!timestampSeconds) return "Recently";
+    const now = Math.floor(Date.now() / 1000);
+    const diff = Math.max(0, now - timestampSeconds);
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    const days = Math.floor(diff / 86400);
+    if (days < 30) return `${days}d ago`;
+    return new Date(timestampSeconds * 1000).toLocaleDateString();
+}
+
+// ============================================================
+// 11. METADATA & TOKEN HYDRATION
+// ============================================================
 
 async function fetchMetadata(uri) {
+    if (!uri) return null;
     try {
         if (uri.startsWith("data:application/json;base64,")) {
             const json = atob(uri.split(",")[1]);
@@ -1106,678 +668,1174 @@ async function fetchMetadata(uri) {
             return JSON.parse(decodeURIComponent(uri.split(",")[1]));
         }
         const url = ipfsToHttp(uri);
-        const res = await fetch(url);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5s safe timeout
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (!res.ok) return null;
         return await res.json();
-    } catch { return null; }
+    } catch {
+        return null;
+    }
 }
 
-
-// ============================================================
-// 16. NFT — MARKETPLACE
-// ============================================================
-
-async function loadMarketplace() {
-    if (!marketContract || !nftContract) return;
-    dom.marketLoading.hidden = false; dom.marketEmpty.hidden = true; dom.marketGrid.hidden = true;
-    dom.marketGrid.innerHTML = "";
+async function getNFTDetails(tokenId) {
+    if (!nftContract) return null;
     try {
-        // Find all NFTListed events, then check which are still active
-        const filter = marketContract.filters.NFTListed(NFT_CONTRACT_ADDRESS);
-        let logs = [];
-        try { logs = await marketContract.queryFilter(filter, 0, "latest"); } catch { }
-        const seenIds = new Set();
-        const activeListings = [];
-        // Check from newest to oldest for efficiency
-        for (let i = logs.length - 1; i >= 0; i--) {
-            const id = logs[i].args.tokenId;
-            if (seenIds.has(id.toString())) continue;
-            seenIds.add(id.toString());
+        const [owner, uri, creator] = await Promise.all([
+            nftContract.ownerOf(tokenId),
+            nftContract.tokenURI(tokenId),
+            nftContract.tokenCreators(tokenId).catch(() => ZERO_ADDRESS)
+        ]);
+
+        let metadata = nftMetadataCache.get(tokenId);
+        if (!metadata) {
+            metadata = await fetchMetadata(uri);
+            if (metadata) nftMetadataCache.set(tokenId, metadata);
+        }
+
+        let listing = { active: false, price: 0n, seller: ZERO_ADDRESS };
+        if (marketContract) {
             try {
-                const [s, p, a] = await marketContract.getListing(NFT_CONTRACT_ADDRESS, id);
-                if (a) activeListings.push(id);
+                const [s, p, a] = await marketContract.getListing(CONTRACTS.sepolia.nft, tokenId);
+                listing = { seller: s, price: p, active: a };
             } catch {}
         }
-        // Fallback: If no event logs were returned or RPC limits were hit, query listings directly up to totalSupply()
-        if (activeListings.length === 0) {
-            try {
-                const total = await nftContract.totalSupply();
-                const totalNum = Number(total);
-                for (let i = 0; i < totalNum; i++) {
-                    if (seenIds.has(i.toString())) continue;
-                    try {
-                        const [s, p, a] = await marketContract.getListing(NFT_CONTRACT_ADDRESS, i);
-                        if (a) {
-                            seenIds.add(i.toString());
-                            activeListings.push(i);
-                        }
-                    } catch {}
-                }
-            } catch (_) {}
-        }
 
-        if (activeListings.length === 0) {
-            dom.marketLoading.hidden = true; dom.marketEmpty.hidden = false; return;
-        }
-        const nfts = await Promise.all(activeListings.map(id => getNFTDetails(id)));
-        dom.marketLoading.hidden = true; dom.marketGrid.hidden = false;
-        let count = 0;
-        nfts.filter(Boolean).forEach(nft => {
-            if (nft.listing.active) { renderNFTCard(nft, dom.marketGrid, false); count++; }
-        });
-        dom.statListedCount.textContent = count;
-        if (count === 0) { dom.marketGrid.hidden = true; dom.marketEmpty.hidden = false; }
+        return {
+            tokenId: tokenId.toString(),
+            owner,
+            creator,
+            uri,
+            name: metadata?.name || `BINFT #${tokenId}`,
+            description: metadata?.description || "No description provided.",
+            image: metadata?.image ? ipfsToHttp(metadata.image) : "favicon.svg",
+            category: metadata?.category || (metadata?.attributes?.find(a => a.trait_type === "Category")?.value) || "Art",
+            attributes: metadata?.attributes || [],
+            listing
+        };
     } catch (err) {
-        console.error("loadMarketplace:", err);
-        dom.marketLoading.hidden = true; dom.marketEmpty.hidden = false;
+        console.warn(`getNFTDetails(${tokenId}) warning:`, err);
+        return null;
     }
 }
 
-// --- Approve marketplace for a specific NFT ---
-async function approveForMarketplace(tokenId) {
-    const s = await getSigner();
-    const wc = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, s);
-    const tx = await wc.approve(MARKETPLACE_ADDRESS, tokenId);
-    await tx.wait();
+// ============================================================
+// 12. DATA LOADING & COLLECTIONS
+// ============================================================
+
+async function postConnection() {
+    loadUserData();
+    loadAllTokens();
+    loadActivity();
 }
 
-// --- Check if marketplace is approved ---
-async function isApprovedForToken(tokenId) {
-    const approved = await nftContract.getApproved(tokenId);
-    if (approved.toLowerCase() === MARKETPLACE_ADDRESS.toLowerCase()) return true;
-    const approvedAll = await nftContract.isApprovedForAll(currentAccount, MARKETPLACE_ADDRESS);
-    return approvedAll;
-}
-
-// --- List NFT ---
-async function listNFT(tokenId, priceEth) {
-    const priceWei = ethers.parseEther(priceEth);
-    dom.sellTxStatus.hidden = false;
-    dom.sellTxStatus.className = "tx-status is-pending";
-
-    // Check & do approval
-    const approved = await isApprovedForToken(tokenId);
-    if (!approved) {
-        dom.sellTxStatus.innerHTML = '<div class="spinner"></div> Approving marketplace (transaction 1/2)…';
-        await approveForMarketplace(tokenId);
+async function loadPublicData() {
+    if (!nftContract) {
+        const p = getReadOnlyRpcProvider();
+        nftContract = new ethers.Contract(CONTRACTS.sepolia.nft, NFT_ABI, p);
+        marketContract = new ethers.Contract(CONTRACTS.sepolia.marketplace, MARKETPLACE_ABI, p);
     }
-
-    // List
-    dom.sellTxStatus.innerHTML = '<div class="spinner"></div> Listing NFT… Confirm in MetaMask.';
-    const s = await getSigner();
-    const wc = new ethers.Contract(MARKETPLACE_ADDRESS, MARKETPLACE_ABI, s);
-    const tx = await wc.listNFT(NFT_CONTRACT_ADDRESS, tokenId, priceWei);
-    dom.sellTxStatus.innerHTML = '<div class="spinner"></div> Waiting for confirmation…';
-    await tx.wait();
-    dom.sellTxStatus.className = "tx-status is-success";
-    dom.sellTxStatus.textContent = "NFT Listed Successfully ✓";
-    showSuccess("NFT listed on marketplace!");
-    setTimeout(() => { dom.sellModal.hidden = true; }, 1500);
-    await refreshAfterNFTChange();
+    loadAllTokens();
+    loadActivity();
 }
 
-// --- Cancel listing ---
-async function cancelListing(tokenId) {
-    setModalTxStatus("pending", "Cancelling listing… Confirm in MetaMask.");
-    const s = await getSigner();
-    const wc = new ethers.Contract(MARKETPLACE_ADDRESS, MARKETPLACE_ABI, s);
-    const tx = await wc.cancelListing(NFT_CONTRACT_ADDRESS, tokenId);
-    setModalTxStatus("pending", "Waiting for confirmation…");
-    await tx.wait();
-    setModalTxStatus("success", "Listing cancelled ✓");
-    showSuccess("Listing cancelled.");
-    await refreshAfterNFTChange();
-    dom.nftModal.hidden = true;
-}
+/**
+ * Queries all minted tokens on Sepolia, hydrates them, and populates
+ * Explore, Marketplace, and Portfolio grids seamlessly.
+ */
+async function loadAllTokens() {
+    if (!nftContract) return;
+    try {
+        const supply = await nftContract.totalSupply();
+        const total = Number(supply);
+        const tokens = [];
 
-// --- Buy NFT ---
-async function buyNFT(tokenId, priceWei) {
-    setModalTxStatus("pending", "Confirm purchase in MetaMask…");
-    const s = await getSigner();
-    const wc = new ethers.Contract(MARKETPLACE_ADDRESS, MARKETPLACE_ABI, s);
-    const tx = await wc.buyNFT(NFT_CONTRACT_ADDRESS, tokenId, { value: priceWei });
-    setModalTxStatus("pending", "Waiting for blockchain confirmation…");
-    const receipt = await tx.wait();
-    setModalTxStatus("success", "Purchase Successful ✓");
-    showSuccess("NFT purchased!");
-    // Show etherscan link in modal
-    const link = document.createElement("a");
-    link.href = `${ETHERSCAN_BASE_URL}/tx/${receipt.hash}`;
-    link.target = "_blank"; link.rel = "noopener noreferrer";
-    link.className = "btn btn--primary btn--sm"; link.textContent = "View on Etherscan ↗";
-    dom.modalActions.appendChild(link);
-    await refreshAfterNFTChange();
-    await loadBalance();
-}
-
-function setModalTxStatus(type, msg) {
-    dom.modalTxStatus.hidden = false;
-    dom.modalTxStatus.className = `tx-status is-${type}`;
-    if (type === "pending") dom.modalTxStatus.innerHTML = `<div class="spinner"></div> ${escapeHtml(msg)}`;
-    else dom.modalTxStatus.textContent = msg;
-}
-
-async function refreshAfterNFTChange() {
-    if (nftContractsConfigured()) {
-        const p = getProvider();
-        if (p) {
-            nftContract = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, p);
-            marketContract = new ethers.Contract(MARKETPLACE_ADDRESS, MARKETPLACE_ABI, p);
+        for (let i = 0; i < total; i++) {
+            const details = await getNFTDetails(i);
+            if (details) tokens.push(details);
         }
-        await loadNFTStats();
+
+        allTokensCache = tokens;
+        updateStatsRibbon();
+        renderExploreShowcase();
+        renderMarketplace();
+        renderPortfolio();
+    } catch (err) {
+        console.warn("loadAllTokens error:", err);
     }
 }
 
+function updateStatsRibbon() {
+    const totalMinted = allTokensCache.length;
+    const listed = allTokensCache.filter(t => t.listing.active).length;
+    const uniqueCreators = new Set(allTokensCache.map(t => t.creator.toLowerCase())).size;
+
+    if (dom.statExploreTotalMinted) dom.statExploreTotalMinted.textContent = totalMinted;
+    if (dom.statExploreListed) dom.statExploreListed.textContent = listed;
+    if (dom.statExploreCreators) dom.statExploreCreators.textContent = uniqueCreators;
+}
 
 // ============================================================
-// 17. NFT — TRANSFER
+// 13. EXPLORE TAB SHOWCASE
 // ============================================================
 
-async function transferNFT(tokenId, toAddress) {
-    if (!ethers.isAddress(toAddress)) {
-        fieldError(dom.transferAddressInput, dom.transferAddressError, "Invalid Ethereum address.");
+function renderExploreShowcase() {
+    if (!dom.exploreFeaturedGrid) return;
+    dom.exploreFeaturedGrid.innerHTML = "";
+    if (allTokensCache.length === 0) {
+        dom.exploreFeaturedGrid.innerHTML = `
+            <div class="state-msg" style="grid-column: 1 / -1;">
+                <p>No NFTs minted on Sepolia yet.</p>
+                <button class="btn btn--primary btn--sm" data-tab-link="create-nft">Create the First NFT</button>
+            </div>`;
         return;
     }
-    dom.transferTxStatus.hidden = false;
-    dom.transferTxStatus.className = "tx-status is-pending";
-    dom.transferTxStatus.innerHTML = '<div class="spinner"></div> Confirm transfer in MetaMask…';
 
-    const s = await getSigner();
-    const wc = new ethers.Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, s);
-    const tx = await wc.safeTransferFrom(currentAccount, toAddress, tokenId);
-    dom.transferTxStatus.innerHTML = '<div class="spinner"></div> Waiting for confirmation…';
-    await tx.wait();
-    dom.transferTxStatus.className = "tx-status is-success";
-    dom.transferTxStatus.textContent = "NFT Transferred ✓";
-    showSuccess("NFT transferred successfully!");
-    setTimeout(() => { dom.transferModal.hidden = true; }, 1500);
-    await refreshAfterNFTChange();
+    // Display up to 3 spotlight NFTs
+    const spotlight = allTokensCache.slice(-3).reverse();
+    for (const nft of spotlight) {
+        dom.exploreFeaturedGrid.appendChild(createNFTCardElement(nft));
+    }
 }
 
-
 // ============================================================
-// 18. NFT — UI RENDERING
+// 14. MARKETPLACE GALLERY
 // ============================================================
 
-function renderNFTCard(nft, container, isOwner) {
+function renderMarketplace() {
+    if (!dom.marketGrid) return;
+    dom.marketGrid.innerHTML = "";
+
+    const query = (dom.marketSearchInput?.value || "").trim().toLowerCase();
+    let filtered = [...allTokensCache];
+
+    // Search filter
+    if (query) {
+        filtered = filtered.filter(t => 
+            t.name.toLowerCase().includes(query) ||
+            t.tokenId.includes(query) ||
+            t.description.toLowerCase().includes(query)
+        );
+    }
+
+    // Category / State filter
+    if (currentMarketFilter === "for-sale") {
+        filtered = filtered.filter(t => t.listing.active);
+    } else if (currentMarketFilter === "owned" && currentAccount) {
+        filtered = filtered.filter(t => t.owner.toLowerCase() === currentAccount.toLowerCase());
+    } else if (currentMarketFilter === "created" && currentAccount) {
+        filtered = filtered.filter(t => t.creator.toLowerCase() === currentAccount.toLowerCase());
+    }
+
+    // Sort
+    if (currentMarketSort === "newest") {
+        filtered.sort((a, b) => Number(b.tokenId) - Number(a.tokenId));
+    } else if (currentMarketSort === "price-asc") {
+        filtered.sort((a, b) => {
+            const pA = a.listing.active ? Number(ethers.formatEther(a.listing.price)) : 999999;
+            const pB = b.listing.active ? Number(ethers.formatEther(b.listing.price)) : 999999;
+            return pA - pB;
+        });
+    } else if (currentMarketSort === "price-desc") {
+        filtered.sort((a, b) => {
+            const pA = a.listing.active ? Number(ethers.formatEther(a.listing.price)) : -1;
+            const pB = b.listing.active ? Number(ethers.formatEther(b.listing.price)) : -1;
+            return pB - pA;
+        });
+    } else if (currentMarketSort === "id-asc") {
+        filtered.sort((a, b) => Number(a.tokenId) - Number(b.tokenId));
+    }
+
+    if (filtered.length === 0) {
+        if (dom.marketEmpty) dom.marketEmpty.hidden = false;
+        return;
+    }
+    if (dom.marketEmpty) dom.marketEmpty.hidden = true;
+
+    for (const nft of filtered) {
+        dom.marketGrid.appendChild(createNFTCardElement(nft));
+    }
+}
+
+function createNFTCardElement(nft) {
     const card = document.createElement("div");
     card.className = "nft-card";
-    card.onclick = () => showNFTDetail(nft.tokenId);
-    const imgSrc = ipfsToHttp(nft.image) || PLACEHOLDER_IMG;
+
+    const isListed = nft.listing.active;
+    const isOwner = currentAccount && nft.owner.toLowerCase() === currentAccount.toLowerCase();
+    const priceEth = isListed ? ethers.formatEther(nft.listing.price) : null;
+
+    let badgeMarkup = `<span class="badge badge--offline">Unlisted</span>`;
+    if (isListed) {
+        badgeMarkup = `<span class="badge badge--success">🏷️ ${priceEth} SepoliaETH</span>`;
+    } else if (isOwner) {
+        badgeMarkup = `<span class="badge badge--accent">👤 You Own</span>`;
+    }
+
     card.innerHTML = `
-        <img class="nft-card-img" src="${escapeHtml(imgSrc)}" alt="${escapeHtml(nft.name)}" onerror="this.src='${PLACEHOLDER_IMG}'">
-        <div class="nft-card-body">
-            <div class="nft-card-name">${escapeHtml(nft.name)}</div>
-            <div class="nft-card-id">Token #${nft.tokenId}</div>
-            <div class="nft-card-owner">${shortenAddress(nft.owner)}</div>
-            ${nft.listing.active ? `<div class="nft-card-price">${ethers.formatEther(nft.listing.price)} ETH</div>` : ""}
+        <div class="nft-img-container">
+            <img src="${escapeHtml(nft.image)}" alt="${escapeHtml(nft.name)}" class="nft-img" loading="lazy" onerror="this.src='favicon.svg'">
+            <div class="nft-badge-overlay">${badgeMarkup}</div>
+            <span class="nft-category-tag">${escapeHtml(nft.category)}</span>
+        </div>
+        <div class="nft-info">
+            <div class="nft-header-row">
+                <span class="nft-title" title="${escapeHtml(nft.name)}">${escapeHtml(nft.name)}</span>
+                <span class="nft-id-tag">#${nft.tokenId}</span>
+            </div>
+            <div class="nft-owner-row">
+                <span>Owner: <code>${shortenAddress(nft.owner)}</code></span>
+            </div>
+            <div class="nft-price-row">
+                <div class="nft-price-box">
+                    <span class="nft-price-label">${isListed ? "Price" : "Status"}</span>
+                    <span class="nft-price-value">${isListed ? `${priceEth} ETH` : (isOwner ? "In Wallet" : "Not Listed")}</span>
+                </div>
+                <div class="nft-card-actions">
+                    <button class="btn btn--primary btn--sm view-btn">View Details</button>
+                </div>
+            </div>
         </div>
     `;
-    container.appendChild(card);
+
+    card.addEventListener("click", () => openNFTModal(nft.tokenId));
+    return card;
 }
 
-async function showNFTDetail(tokenId) {
-    if (!nftContract) return;
-    dom.nftModal.hidden = false;
-    dom.modalTxStatus.hidden = true;
-    dom.modalActions.innerHTML = "";
-    dom.modalImage.src = PLACEHOLDER_IMG;
-    dom.modalName.textContent = "Loading…";
-    dom.modalDesc.textContent = "";
+// ============================================================
+// 15. MY NFTS PORTFOLIO
+// ============================================================
 
-    const nft = await getNFTDetails(BigInt(tokenId));
-    if (!nft) { dom.modalName.textContent = "NFT not found"; return; }
-    activeModalTokenId = tokenId;
-    activeModalNft = nft;
+function renderPortfolio() {
+    if (!dom.myNftsGrid) return;
+    dom.myNftsGrid.innerHTML = "";
 
-    dom.modalImage.src = ipfsToHttp(nft.image) || PLACEHOLDER_IMG;
-    dom.modalImage.onerror = function() { this.src = PLACEHOLDER_IMG; };
-    dom.modalName.textContent = nft.name;
-    dom.modalDesc.textContent = nft.description;
-    dom.modalTokenId.textContent = "#" + nft.tokenId;
-    dom.modalOwner.textContent = shortenAddress(nft.owner);
-    dom.modalCreator.textContent = shortenAddress(nft.creator);
-    dom.modalContract.textContent = shortenAddress(NFT_CONTRACT_ADDRESS);
-    dom.modalMetadataUri.textContent = nft.uri.length > 60 ? nft.uri.substring(0, 60) + "…" : nft.uri;
-
-    const isOwner = currentAccount && nft.owner.toLowerCase() === currentAccount.toLowerCase();
-
-    if (nft.listing.active) {
-        dom.modalListingStatus.textContent = "Listed for sale";
-        dom.modalPrice.textContent = ethers.formatEther(nft.listing.price) + " SepoliaETH";
-        if (isOwner) {
-            addModalBtn("Cancel Listing", "btn--danger", () => wrapAsync(() => cancelListing(nft.tokenId)));
-        } else {
-            addModalBtn(`Buy for ${ethers.formatEther(nft.listing.price)} ETH`, "btn--success", () => wrapAsync(() => buyNFT(nft.tokenId, nft.listing.price)));
-        }
-    } else {
-        dom.modalListingStatus.textContent = "Not listed";
-        dom.modalPrice.textContent = "—";
-        if (isOwner) {
-            addModalBtn("Sell NFT", "btn--primary", () => openSellModal(nft.tokenId));
-            addModalBtn("Transfer", "btn--ghost", () => openTransferModal(nft.tokenId));
-        }
+    if (!currentAccount) {
+        dom.myNftsEmpty.hidden = false;
+        dom.myNftsEmpty.querySelector("p").textContent = "Please connect your MetaMask wallet to view your NFT portfolio.";
+        return;
     }
-    // Etherscan link
-    addModalBtn("View Contract ↗", "btn--ghost btn--sm", () => window.open(`${ETHERSCAN_BASE_URL}/address/${NFT_CONTRACT_ADDRESS}`, "_blank"));
-}
 
-function addModalBtn(text, cls, handler) {
-    const btn = document.createElement("button");
-    btn.className = `btn ${cls}`; btn.textContent = text;
-    btn.addEventListener("click", handler);
-    dom.modalActions.appendChild(btn);
-}
+    const owned = allTokensCache.filter(t => t.owner.toLowerCase() === currentAccount.toLowerCase());
+    const created = allTokensCache.filter(t => t.creator.toLowerCase() === currentAccount.toLowerCase());
+    const listed = owned.filter(t => t.listing.active);
 
-function wrapAsync(fn) {
-    fn().catch(err => {
-        console.error(err);
-        const code = err.code || err?.info?.error?.code;
-        const msg = err.message || "";
-        if (code === "ACTION_REJECTED" || code === 4001) { setModalTxStatus("error", "Transaction cancelled."); }
-        else if (msg.includes("insufficient funds")) { setModalTxStatus("error", "Not enough Sepolia ETH."); }
-        else { setModalTxStatus("error", "Transaction failed."); }
-    });
-}
+    if (dom.portStatOwned) dom.portStatOwned.textContent = owned.length;
+    if (dom.portStatCreated) dom.portStatCreated.textContent = created.length;
+    if (dom.portStatListed) dom.portStatListed.textContent = listed.length;
 
-function openSellModal(tokenId) {
-    activeModalTokenId = tokenId;
-    dom.nftModal.hidden = true;
-    dom.sellModal.hidden = false;
-    dom.sellPriceInput.value = "";
-    dom.sellPriceError.hidden = true;
-    dom.sellTxStatus.hidden = true;
-}
+    let displayList = owned;
+    if (currentPortfolioFilter === "created") displayList = created;
+    if (currentPortfolioFilter === "listed") displayList = listed;
 
-function openTransferModal(tokenId) {
-    activeModalTokenId = tokenId;
-    dom.nftModal.hidden = true;
-    dom.transferModal.hidden = false;
-    dom.transferAddressInput.value = "";
-    dom.transferAddressError.hidden = true;
-    dom.transferTxStatus.hidden = true;
-}
+    if (displayList.length === 0) {
+        dom.myNftsEmpty.hidden = false;
+        dom.myNftsEmpty.querySelector("p").textContent = `No ${currentPortfolioFilter} NFTs found for this wallet.`;
+        return;
+    }
 
+    dom.myNftsEmpty.hidden = true;
+    for (const nft of displayList) {
+        dom.myNftsGrid.appendChild(createNFTCardElement(nft));
+    }
+}
 
 // ============================================================
-// 19. NFT — ACTIVITY
+// 16. BLOCKCHAIN ACTIVITY FEED (REAL SEPOLIA EVENTS)
 // ============================================================
 
+/**
+ * Queries real on-chain events from BlockchainIdentityNFT and NFTMarketplace
+ * starting safely from SEPOLIA_DEPLOYMENT_BLOCK.
+ */
 async function loadActivity() {
     if (!nftContract) return;
-    dom.activityLoading.hidden = false; dom.activityEmpty.hidden = true; dom.activityBody.hidden = true;
-    dom.activityTableBody.innerHTML = "";
+    if (dom.activityLoading) dom.activityLoading.hidden = false;
+    if (dom.activityEmpty) dom.activityEmpty.hidden = true;
+    if (dom.activityBody) dom.activityBody.hidden = true;
+    if (dom.activityTableBody) dom.activityTableBody.innerHTML = "";
+
     try {
         const events = [];
-        // Get Transfer events (includes mints where from=0x0)
+
+        // 1. Query ERC-721 Transfer events (captures mints where from=0x0 and secondary transfers)
         const transferFilter = nftContract.filters.Transfer();
-        let tLogs = [];
-        try { tLogs = await nftContract.queryFilter(transferFilter, 0, "latest"); } catch {}
-        for (const log of tLogs) {
+        const transferLogs = await getLogsInChunks(nftContract, transferFilter);
+
+        for (const log of transferLogs) {
             const from = log.args.from;
+            const to   = log.args.to;
             const isMint = from === ZERO_ADDRESS;
             events.push({
                 type: isMint ? "Mint" : "Transfer",
                 tokenId: log.args.tokenId.toString(),
-                from: isMint ? "—" : shortenAddress(from),
-                to: shortenAddress(log.args.to),
+                from: isMint ? "Genesis" : from,
+                to: to,
                 price: "—",
-                txHash: log.transactionHash,
-                block: log.blockNumber
+                blockNumber: log.blockNumber,
+                txHash: log.transactionHash
             });
         }
-        // Marketplace events
+
+        // 2. Query Marketplace Events if contract exists
         if (marketContract) {
-            try {
-                const listedLogs = await marketContract.queryFilter(marketContract.filters.NFTListed(NFT_CONTRACT_ADDRESS), 0, "latest");
-                for (const l of listedLogs) {
-                    events.push({ type: "Listed", tokenId: l.args.tokenId.toString(), from: shortenAddress(l.args.seller), to: "—", price: ethers.formatEther(l.args.price) + " ETH", txHash: l.transactionHash, block: l.blockNumber });
-                }
-            } catch {}
-            try {
-                const soldLogs = await marketContract.queryFilter(marketContract.filters.NFTSold(NFT_CONTRACT_ADDRESS), 0, "latest");
-                for (const l of soldLogs) {
-                    events.push({ type: "Sale", tokenId: l.args.tokenId.toString(), from: shortenAddress(l.args.seller), to: shortenAddress(l.args.buyer), price: ethers.formatEther(l.args.price) + " ETH", txHash: l.transactionHash, block: l.blockNumber });
-                }
-            } catch {}
-            try {
-                const cancelLogs = await marketContract.queryFilter(marketContract.filters.ListingCancelled(NFT_CONTRACT_ADDRESS), 0, "latest");
-                for (const l of cancelLogs) {
-                    events.push({ type: "Cancel", tokenId: l.args.tokenId.toString(), from: shortenAddress(l.args.seller), to: "—", price: "—", txHash: l.transactionHash, block: l.blockNumber });
-                }
-            } catch {}
+            const [listedLogs, soldLogs, cancelLogs] = await Promise.all([
+                getLogsInChunks(marketContract, marketContract.filters.NFTListed(CONTRACTS.sepolia.nft)),
+                getLogsInChunks(marketContract, marketContract.filters.NFTSold(CONTRACTS.sepolia.nft)),
+                getLogsInChunks(marketContract, marketContract.filters.ListingCancelled(CONTRACTS.sepolia.nft))
+            ]);
+
+            for (const l of listedLogs) {
+                events.push({
+                    type: "Listed",
+                    tokenId: l.args.tokenId.toString(),
+                    from: l.args.seller,
+                    to: "Marketplace",
+                    price: ethers.formatEther(l.args.price) + " ETH",
+                    blockNumber: l.blockNumber,
+                    txHash: l.transactionHash
+                });
+            }
+
+            for (const s of soldLogs) {
+                events.push({
+                    type: "Sale",
+                    tokenId: s.args.tokenId.toString(),
+                    from: s.args.seller,
+                    to: s.args.buyer,
+                    price: ethers.formatEther(s.args.price) + " ETH",
+                    blockNumber: s.blockNumber,
+                    txHash: s.transactionHash
+                });
+            }
+
+            for (const c of cancelLogs) {
+                events.push({
+                    type: "Cancel",
+                    tokenId: c.args.tokenId.toString(),
+                    from: c.args.seller,
+                    to: "—",
+                    price: "—",
+                    blockNumber: c.blockNumber,
+                    txHash: c.transactionHash
+                });
+            }
         }
-        // Sort by block descending
-        events.sort((a, b) => (b.block || 0) - (a.block || 0));
-        if (events.length === 0) {
-            dom.activityLoading.hidden = true; dom.activityEmpty.hidden = false; return;
-        }
-        // Render (limit to 50 most recent)
-        const display = events.slice(0, 50);
-        for (const ev of display) {
-            const badgeCls = { Mint: "mint", Sale: "sale", Listed: "list", Cancel: "cancel", Transfer: "transfer" }[ev.type] || "transfer";
-            const tr = document.createElement("tr");
-            tr.innerHTML = `
-                <td><span class="activity-badge activity-badge--${badgeCls}">${ev.type}</span></td>
-                <td>#${ev.tokenId}</td>
-                <td>${ev.from}</td>
-                <td>${ev.to}</td>
-                <td>${ev.price}</td>
-                <td><a href="${ETHERSCAN_BASE_URL}/tx/${ev.txHash}" target="_blank" rel="noopener noreferrer" class="link">${ev.txHash.slice(0,10)}…</a></td>
-            `;
-            dom.activityTableBody.appendChild(tr);
-        }
-        dom.activityLoading.hidden = true; dom.activityBody.hidden = false;
+
+        // Deduplicate & sort newest block first
+        events.sort((a, b) => (b.blockNumber || 0) - (a.blockNumber || 0));
+        allActivityEvents = events;
+
+        // Calculate Stats
+        const mintsCount = events.filter(e => e.type === "Mint").length;
+        const listingsCount = events.filter(e => e.type === "Listed").length;
+        const salesCount = events.filter(e => e.type === "Sale").length;
+
+        if (dom.actStatTotal) dom.actStatTotal.textContent = events.length;
+        if (dom.actStatMints) dom.actStatMints.textContent = mintsCount;
+        if (dom.actStatListings) dom.actStatListings.textContent = listingsCount;
+        if (dom.actStatSales) dom.actStatSales.textContent = salesCount;
+
+        // Calculate Total Sales Volume for Explore Hero
+        const totalVolumeEth = events
+            .filter(e => e.type === "Sale" && e.price.includes("ETH"))
+            .reduce((acc, curr) => acc + parseFloat(curr.price), 0);
+        if (dom.statExploreVolume) dom.statExploreVolume.textContent = `${totalVolumeEth.toFixed(2)} ETH`;
+
+        renderActivityTable();
     } catch (err) {
-        console.error("loadActivity:", err);
-        dom.activityLoading.hidden = true; dom.activityEmpty.hidden = false;
+        console.error("loadActivity error:", err);
+        if (dom.activityLoading) dom.activityLoading.hidden = true;
+        if (dom.activityEmpty) dom.activityEmpty.hidden = false;
     }
 }
 
+async function renderActivityTable() {
+    if (!dom.activityTableBody) return;
+    dom.activityTableBody.innerHTML = "";
 
-// ============================================================
-// 20. ERROR HANDLING
-// ============================================================
+    let filtered = allActivityEvents;
+    if (currentActFilter !== "all") {
+        filtered = filtered.filter(e => e.type === currentActFilter);
+    }
 
-function handleConnectionError(err) {
-    if (err.code === 4001) showError("Connection rejected in MetaMask.");
-    else if (err.code === -32002) showError("MetaMask connection pending — check MetaMask.");
-    else { showError("Could not connect to MetaMask."); console.error(err); }
+    if (filtered.length === 0) {
+        if (dom.activityLoading) dom.activityLoading.hidden = true;
+        if (dom.activityEmpty) dom.activityEmpty.hidden = false;
+        if (dom.activityBody) dom.activityBody.hidden = true;
+        return;
+    }
+
+    if (dom.activityLoading) dom.activityLoading.hidden = true;
+    if (dom.activityEmpty) dom.activityEmpty.hidden = true;
+    if (dom.activityBody) dom.activityBody.hidden = false;
+
+    // Limit to 50 most recent records
+    const displayList = filtered.slice(0, 50);
+
+    for (const ev of displayList) {
+        const tr = document.createElement("tr");
+        const badgeCls = {
+            Mint: "act-badge--mint",
+            Listed: "act-badge--list",
+            Sale: "act-badge--sale",
+            Transfer: "act-badge--transfer",
+            Cancel: "act-badge--cancel"
+        }[ev.type] || "act-badge--transfer";
+
+        const icon = {
+            Mint: "🎨 Minted",
+            Listed: "🏷️ Listed",
+            Sale: "💰 Sold",
+            Transfer: "↔️ Transferred",
+            Cancel: "❌ Cancelled"
+        }[ev.type] || ev.type;
+
+        const tokenCached = allTokensCache.find(t => t.tokenId === ev.tokenId);
+        const itemName = tokenCached ? tokenCached.name : `BINFT #${ev.tokenId}`;
+
+        tr.innerHTML = `
+            <td><span class="act-badge ${badgeCls}">${icon}</span></td>
+            <td>
+                <span style="font-weight:600; cursor:pointer;" onclick="openNFTModal('${ev.tokenId}')">
+                    ${escapeHtml(itemName)} <small style="color:var(--text-dim); font-family:var(--mono);">#${ev.tokenId}</small>
+                </span>
+            </td>
+            <td><code>${ev.from === "Genesis" ? "Genesis (0x0)" : shortenAddress(ev.from)}</code></td>
+            <td><code>${ev.to === "Marketplace" ? "Marketplace" : shortenAddress(ev.to)}</code></td>
+            <td style="font-weight:700; font-family:var(--mono);">${ev.price}</td>
+            <td class="act-time" id="time-${ev.txHash.slice(2, 10)}">Block #${ev.blockNumber}</td>
+            <td>
+                <a href="${ETHERSCAN_BASE_URL}/tx/${ev.txHash}" target="_blank" rel="noopener noreferrer" class="link">
+                    ${ev.txHash.slice(0, 8)}… ↗
+                </a>
+            </td>
+        `;
+        dom.activityTableBody.appendChild(tr);
+
+        // Fetch and format block time asynchronously
+        getBlockTimestamp(ev.blockNumber).then(timestamp => {
+            if (timestamp) {
+                const timeEl = document.getElementById(`time-${ev.txHash.slice(2, 10)}`);
+                if (timeEl) timeEl.textContent = formatTimeAgo(timestamp);
+            }
+        });
+    }
 }
 
-function handleTransactionError(err) {
-    console.error("Transaction error:", err);
-    const code = err.code || err?.info?.error?.code;
-    const msg  = err.message || "";
-    if (code === "ACTION_REJECTED" || code === 4001) showTxError("Transaction cancelled in MetaMask.");
-    else if (msg.includes("insufficient funds") || msg.includes("INSUFFICIENT_FUNDS")) showTxError("Not enough Sepolia ETH for gas.");
-    else if (code === "CALL_EXCEPTION") showTxError("Smart contract rejected the transaction.");
-    else if (msg.includes("nonce")) showTxError("Nonce conflict — reset MetaMask account activity.");
-    else if (code === "NETWORK_ERROR") showTxError("Network error — check your connection.");
-    else showTxError("Transaction failed. Please try again.");
-}
-
-function showTxError(msg) {
-    dom.txCard.hidden = false;
-    dom.txStatus.className = "tx-status is-error";
-    dom.txStatus.textContent = "❌ " + msg;
-    dom.txDetails.hidden = true; dom.txActions.hidden = true;
-}
-
-function showError(msg)   { showNotification(msg, "error"); }
-function showSuccess(msg) { showNotification(msg, "success"); }
-
-function showNotification(message, type) {
-    const el = document.createElement("div");
-    el.setAttribute("role", "alert");
-    el.style.cssText = `position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;max-width:380px;padding:.85rem 1.1rem;border-radius:10px;font-size:.88rem;font-weight:500;color:#fff;opacity:0;transform:translateY(10px);transition:opacity .25s,transform .25s;box-shadow:0 4px 24px rgba(0,0,0,.4);background:${type==="error"?"#dc2626":"#16a34a"}`;
-    el.textContent = message;
-    document.body.appendChild(el);
-    requestAnimationFrame(() => { el.style.opacity = "1"; el.style.transform = "translateY(0)"; });
-    setTimeout(() => { el.style.opacity = "0"; el.style.transform = "translateY(10px)"; setTimeout(() => el.remove(), 300); }, 4500);
-}
-
-
 // ============================================================
-// 21. EVENT LISTENERS
+// 17. FUTURE REAL-TIME EVENT STREAMING
 // ============================================================
 
-dom.connectBtn.addEventListener("click", connectWallet);
-if (dom.welcomeConnectBtn) dom.welcomeConnectBtn.addEventListener("click", connectWallet);
-dom.switchNetworkBtn.addEventListener("click", switchToSepolia);
-dom.storeForm.addEventListener("submit", e => { e.preventDefault(); storeUserData(); });
-dom.mintBtn.addEventListener("click", mintNFT);
+function attachFutureEventListeners() {
+    if (isFutureListenersAttached || !nftContract || !marketContract) return;
+    isFutureListenersAttached = true;
 
-// Tab navigation
-document.querySelectorAll(".tab-btn").forEach(btn => {
-    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
-});
-// Tab links (buttons with data-tab-link)
-document.addEventListener("click", e => {
-    const link = e.target.closest("[data-tab-link]");
-    if (link) { e.preventDefault(); switchTab(link.dataset.tabLink); }
-});
+    // Real-time Transfer & Mint detection
+    nftContract.on("Transfer", (from, to, tokenId, event) => {
+        console.log("⚡ Real-time Transfer on Sepolia:", { from, to, tokenId: tokenId.toString() });
+        setTimeout(() => {
+            loadActivity();
+            loadAllTokens();
+        }, 1500);
+    });
 
-// Refresh buttons
-dom.refreshBtn.addEventListener("click", async () => {
-    if (!isSepoliaActive()) { showError("Switch to Sepolia first."); return; }
-    await loadUserData(); await loadBalance(); showSuccess("Data refreshed.");
-});
-dom.refreshAllBtn.addEventListener("click", async () => {
-    if (!isSepoliaActive()) return;
-    await Promise.all([loadUserData(), loadBalance()]);
-    if (nftContractsConfigured()) await loadNFTStats();
-    showSuccess("All data refreshed.");
-});
-dom.refreshMyNftsBtn.addEventListener("click", () => loadMyNFTs());
-dom.refreshMarketBtn.addEventListener("click", () => loadMarketplace());
-dom.refreshActivityBtn.addEventListener("click", () => loadActivity());
+    // Real-time Listing
+    marketContract.on("NFTListed", (nftAddr, tokenId, seller, price, event) => {
+        console.log("⚡ Real-time NFTListed on Sepolia:", { tokenId: tokenId.toString() });
+        setTimeout(() => {
+            loadActivity();
+            loadAllTokens();
+        }, 1500);
+    });
 
-// Copy buttons
-dom.copyAddressBtn.addEventListener("click", () => {
-    if (!currentAccount) return;
-    navigator.clipboard.writeText(currentAccount).then(() => { dom.copyFeedback.hidden = false; setTimeout(() => dom.copyFeedback.hidden = true, 2000); });
-});
-dom.copyContractBtn.addEventListener("click", () => { navigator.clipboard.writeText(CONTRACT_ADDRESS).then(() => showSuccess("Identity contract address copied!")); });
-dom.copyNftContractBtn.addEventListener("click", () => { if (NFT_CONTRACT_ADDRESS) navigator.clipboard.writeText(NFT_CONTRACT_ADDRESS).then(() => showSuccess("NFT contract address copied!")); });
-dom.copyMarketplaceBtn.addEventListener("click", () => { if (MARKETPLACE_ADDRESS) navigator.clipboard.writeText(MARKETPLACE_ADDRESS).then(() => showSuccess("Marketplace address copied!")); });
+    // Real-time Sale
+    marketContract.on("NFTSold", (nftAddr, tokenId, seller, buyer, price, event) => {
+        console.log("⚡ Real-time NFTSold on Sepolia:", { tokenId: tokenId.toString(), buyer });
+        setTimeout(() => {
+            loadActivity();
+            loadAllTokens();
+        }, 1500);
+    });
 
-// Identity validation clearing
-dom.inputName.addEventListener("input", () => { dom.inputName.classList.remove("is-invalid"); dom.nameError.hidden = true; });
-dom.inputRole.addEventListener("input", () => { dom.inputRole.classList.remove("is-invalid"); dom.roleError.hidden = true; });
+    // Real-time Cancel
+    marketContract.on("ListingCancelled", (nftAddr, tokenId, seller, event) => {
+        console.log("⚡ Real-time ListingCancelled on Sepolia:", { tokenId: tokenId.toString() });
+        setTimeout(() => {
+            loadActivity();
+            loadAllTokens();
+        }, 1500);
+    });
+}
 
-// Metadata mode toggle
-dom.modeAutoBtn.addEventListener("click", () => {
-    metadataMode = "auto";
-    dom.modeAutoBtn.className = "btn btn--sm btn--primary";
-    dom.modeManualBtn.className = "btn btn--sm btn--ghost";
-    dom.autoMetadataFields.hidden = false; dom.manualMetadataFields.hidden = true;
-});
-dom.modeManualBtn.addEventListener("click", () => {
-    metadataMode = "manual";
-    dom.modeManualBtn.className = "btn btn--sm btn--primary";
-    dom.modeAutoBtn.className = "btn btn--sm btn--ghost";
-    dom.autoMetadataFields.hidden = true; dom.manualMetadataFields.hidden = false;
-});
+// ============================================================
+// 18. NFT MINTING (CREATOR STUDIO)
+// ============================================================
 
-// Modals — close
-dom.modalClose.addEventListener("click", () => dom.nftModal.hidden = true);
-dom.sellModalClose.addEventListener("click", () => dom.sellModal.hidden = true);
-dom.transferModalClose.addEventListener("click", () => dom.transferModal.hidden = true);
-// Close modal on overlay click
-[dom.nftModal, dom.sellModal, dom.transferModal].forEach(m => {
-    m.addEventListener("click", e => { if (e.target === m) m.hidden = true; });
-});
+async function mintNFT() {
+    if (!window.ethereum) { showNoMetaMask(); return; }
+    if (!currentAccount) {
+        showError("Please connect your MetaMask wallet first.");
+        await connectWallet();
+        return;
+    }
+    if (!isSepoliaActive()) { showError("Switch to Sepolia network first."); return; }
+    if (!nftContractsConfigured()) { showError("NFT contract address not configured."); return; }
 
-// Sell confirm
-dom.sellConfirmBtn.addEventListener("click", () => {
-    const price = dom.sellPriceInput.value.trim();
+    let metadataURI = "";
+
+    if (metadataMode === "auto") {
+        const name  = dom.nftNameInput.value.trim();
+        const desc  = dom.nftDescInput.value.trim();
+        const img   = dom.nftImageInput.value.trim();
+        const cat   = dom.nftCategoryInput.value.trim() || "Art";
+
+        let ok = true;
+        if (!name) { dom.nftNameError.textContent = "NFT title is required."; dom.nftNameError.hidden = false; ok = false; }
+        else dom.nftNameError.hidden = true;
+
+        if (!desc) { dom.nftDescError.textContent = "Description is required."; dom.nftDescError.hidden = false; ok = false; }
+        else dom.nftDescError.hidden = true;
+
+        if (!img) { dom.nftImageError.textContent = "Artwork image URI is required."; dom.nftImageError.hidden = false; ok = false; }
+        else dom.nftImageError.hidden = true;
+
+        if (!ok) return;
+
+        // Build standard ERC-721 metadata JSON as base64 data URI
+        const metadata = {
+            name,
+            description: desc,
+            image: img,
+            category: cat,
+            attributes: [
+                { trait_type: "Creator", value: currentAccount },
+                { trait_type: "Category", value: cat }
+            ]
+        };
+        metadataURI = "data:application/json;base64," + btoa(unescape(encodeURIComponent(JSON.stringify(metadata))));
+    } else {
+        metadataURI = dom.manualUriInput.value.trim();
+        if (!metadataURI) {
+            dom.manualUriError.textContent = "Metadata URI is required.";
+            dom.manualUriError.hidden = false;
+            return;
+        }
+        dom.manualUriError.hidden = true;
+    }
+
+    // Step UI progression
+    dom.step1Node.className = "step-node completed";
+    dom.step2Node.className = "step-node completed";
+    dom.step3Node.className = "step-node active";
+
+    dom.mintBtn.disabled = true;
+    dom.mintBtn.innerHTML = `<div class="spinner"></div> Confirming in MetaMask…`;
+    dom.mintTxCard.hidden = false;
+    dom.mintTxStatus.className = "tx-status is-pending";
+    dom.mintTxStatus.innerHTML = `<div class="spinner"></div> Please confirm the mint transaction in MetaMask…`;
+
+    try {
+        const signerInstance = await getSigner();
+        const nftWithSigner = new ethers.Contract(CONTRACTS.sepolia.nft, NFT_ABI, signerInstance);
+
+        const tx = await nftWithSigner.mintNFT(metadataURI);
+        dom.mintTxStatus.innerHTML = `<div class="spinner"></div> Mint transaction sent! Waiting for Sepolia block confirmation…`;
+
+        const receipt = await tx.wait(1);
+        dom.step3Node.className = "step-node completed";
+
+        // Parse Token ID from logs
+        let mintedTokenId = "0";
+        for (const log of receipt.logs) {
+            try {
+                const parsed = nftContract.interface.parseLog(log);
+                if (parsed && parsed.name === "Transfer") {
+                    mintedTokenId = parsed.args.tokenId.toString();
+                    break;
+                }
+            } catch {}
+        }
+
+        dom.mintTxStatus.className = "tx-status is-success";
+        dom.mintTxStatus.innerHTML = `🎉 NFT Minted Successfully! Token #${mintedTokenId}`;
+        dom.mintTokenId.textContent = `#${mintedTokenId}`;
+        dom.mintTxHash.textContent = receipt.hash;
+        dom.mintTxBlock.textContent = receipt.blockNumber;
+        dom.mintEtherscanLink.href = `${ETHERSCAN_BASE_URL}/tx/${receipt.hash}`;
+        dom.mintTxDetails.hidden = false;
+        dom.mintTxActions.hidden = false;
+
+        showSuccess(`Minted NFT #${mintedTokenId}!`);
+
+        // Check if user set an initial listing price
+        const initPrice = dom.nftInitialPriceInput?.value?.trim();
+        if (initPrice && parseFloat(initPrice) > 0) {
+            setTimeout(() => {
+                promptImmediateListing(mintedTokenId, initPrice);
+            }, 1500);
+        }
+
+        // Refresh data
+        setTimeout(() => {
+            loadAllTokens();
+            loadActivity();
+        }, 2000);
+    } catch (err) {
+        console.error("Mint error:", err);
+        dom.mintTxStatus.className = "tx-status is-error";
+        if (err.code === 4001 || err.code === "ACTION_REJECTED") {
+            dom.mintTxStatus.textContent = "Transaction cancelled in MetaMask.";
+        } else {
+            dom.mintTxStatus.textContent = "Mint transaction failed: " + (err.message || "Unknown error");
+        }
+    } finally {
+        dom.mintBtn.disabled = false;
+        dom.mintBtn.innerHTML = `<span class="btn-icon">⚡</span> Mint NFT on Sepolia`;
+    }
+}
+
+async function promptImmediateListing(tokenId, priceEth) {
+    activeModalTokenId = tokenId;
+    dom.sellPriceInput.value = priceEth;
+    dom.sellModal.hidden = false;
+    showToast(`Step 2: Confirm listing for Token #${tokenId}`, "🏷️");
+}
+
+// ============================================================
+// 19. NFT DETAIL MODAL & INTERACTIONS
+// ============================================================
+
+async function openNFTModal(tokenId) {
+    const nft = allTokensCache.find(t => t.tokenId === tokenId.toString()) || await getNFTDetails(tokenId);
+    if (!nft) { showError("Could not load NFT details."); return; }
+
+    activeModalTokenId = tokenId;
+    dom.modalImage.src = nft.image;
+    dom.modalCategory.textContent = nft.category || "Art";
+    dom.modalName.textContent = nft.name;
+    dom.modalTokenId.textContent = `Token #${nft.tokenId} · ERC-721`;
+    dom.modalDesc.textContent = nft.description;
+    dom.modalOwner.textContent = nft.owner;
+    dom.modalCreator.textContent = nft.creator;
+    dom.modalContract.textContent = CONTRACTS.sepolia.nft;
+    dom.modalMetadataUri.textContent = nft.uri;
+
+    const isOwner = currentAccount && nft.owner.toLowerCase() === currentAccount.toLowerCase();
+    const isListed = nft.listing.active;
+
+    if (isListed) {
+        const price = ethers.formatEther(nft.listing.price);
+        dom.modalListingStatus.innerHTML = `<span class="badge badge--success">Listed for Sale</span>`;
+        dom.modalPrice.textContent = `${price} SepoliaETH`;
+    } else {
+        dom.modalListingStatus.innerHTML = `<span class="badge badge--offline">Not Listed</span>`;
+        dom.modalPrice.textContent = "—";
+    }
+
+    // Build Contextual Action Buttons
+    dom.modalActions.innerHTML = "";
+
+    if (isListed && !isOwner) {
+        const buyBtn = document.createElement("button");
+        buyBtn.className = "btn btn--primary btn--lg";
+        buyBtn.innerHTML = `🛒 Buy for ${ethers.formatEther(nft.listing.price)} ETH`;
+        buyBtn.onclick = () => executeBuy(nft);
+        dom.modalActions.appendChild(buyBtn);
+    } else if (isOwner && !isListed) {
+        const listBtn = document.createElement("button");
+        listBtn.className = "btn btn--primary btn--lg";
+        listBtn.innerHTML = `🏷️ List for Sale`;
+        listBtn.onclick = () => { dom.nftModal.hidden = true; dom.sellModal.hidden = false; };
+        dom.modalActions.appendChild(listBtn);
+
+        const transferBtn = document.createElement("button");
+        transferBtn.className = "btn btn--secondary btn--lg";
+        transferBtn.innerHTML = `📤 Transfer`;
+        transferBtn.onclick = () => { dom.nftModal.hidden = true; dom.transferModal.hidden = false; };
+        dom.modalActions.appendChild(transferBtn);
+    } else if (isOwner && isListed) {
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "btn btn--danger btn--lg";
+        cancelBtn.innerHTML = `❌ Cancel Listing`;
+        cancelBtn.onclick = () => executeCancelListing(nft);
+        dom.modalActions.appendChild(cancelBtn);
+    }
+
+    const etherscanBtn = document.createElement("a");
+    etherscanBtn.className = "btn btn--ghost btn--sm";
+    etherscanBtn.href = `${ETHERSCAN_BASE_URL}/token/${CONTRACTS.sepolia.nft}?a=${nft.tokenId}`;
+    etherscanBtn.target = "_blank";
+    etherscanBtn.rel = "noopener noreferrer";
+    etherscanBtn.innerHTML = `Sepolia Etherscan ↗`;
+    dom.modalActions.appendChild(etherscanBtn);
+
+    dom.nftModal.hidden = false;
+}
+
+// Buy NFT Flow
+async function executeBuy(nft) {
+    if (!currentAccount) { showError("Please connect your wallet first."); return; }
+    if (!isSepoliaActive()) { showError("Please switch to Sepolia."); return; }
+
+    dom.modalTxStatus.hidden = false;
+    dom.modalTxStatus.className = "tx-status is-pending";
+    dom.modalTxStatus.innerHTML = `<div class="spinner"></div> Confirm purchase in MetaMask…`;
+
+    try {
+        const signerInstance = await getSigner();
+        const marketWithSigner = new ethers.Contract(CONTRACTS.sepolia.marketplace, MARKETPLACE_ABI, signerInstance);
+
+        const tx = await marketWithSigner.buyNFT(CONTRACTS.sepolia.nft, nft.tokenId, {
+            value: nft.listing.price
+        });
+        dom.modalTxStatus.innerHTML = `<div class="spinner"></div> Purchase transaction sent! Waiting for block confirmation…`;
+
+        const receipt = await tx.wait(1);
+        dom.modalTxStatus.className = "tx-status is-success";
+        dom.modalTxStatus.innerHTML = `🎉 Successfully purchased Token #${nft.tokenId}!`;
+        showSuccess(`Purchased Token #${nft.tokenId}!`);
+
+        setTimeout(() => {
+            dom.nftModal.hidden = true;
+            loadAllTokens();
+            loadActivity();
+        }, 2000);
+    } catch (err) {
+        console.error("Buy error:", err);
+        dom.modalTxStatus.className = "tx-status is-error";
+        dom.modalTxStatus.textContent = err.code === 4001 ? "Purchase cancelled." : "Purchase failed: " + (err.message || "");
+    }
+}
+
+// List NFT Flow (handles ERC-721 approval if needed)
+async function executeList() {
+    if (!activeModalTokenId) return;
+    const priceStr = dom.sellPriceInput.value.trim();
+    if (!priceStr || parseFloat(priceStr) <= 0) {
+        dom.sellPriceError.textContent = "Please enter a valid price in SepoliaETH.";
+        dom.sellPriceError.hidden = false;
+        return;
+    }
     dom.sellPriceError.hidden = true;
-    if (!price || parseFloat(price) <= 0) {
-        fieldError(dom.sellPriceInput, dom.sellPriceError, "Enter a valid price > 0.");
-        return;
-    }
+
     dom.sellConfirmBtn.disabled = true;
-    listNFT(activeModalTokenId, price).catch(err => {
-        console.error(err);
-        dom.sellTxStatus.hidden = false;
+    dom.sellTxStatus.hidden = false;
+    dom.sellTxStatus.className = "tx-status is-pending";
+    dom.sellTxStatus.innerHTML = `<div class="spinner"></div> Checking marketplace approval…`;
+
+    try {
+        const signerInstance = await getSigner();
+        const nftWithSigner = new ethers.Contract(CONTRACTS.sepolia.nft, NFT_ABI, signerInstance);
+        const marketWithSigner = new ethers.Contract(CONTRACTS.sepolia.marketplace, MARKETPLACE_ABI, signerInstance);
+
+        // 1. Check approval
+        const approved = await nftWithSigner.getApproved(activeModalTokenId);
+        if (approved.toLowerCase() !== CONTRACTS.sepolia.marketplace.toLowerCase()) {
+            dom.sellTxStatus.innerHTML = `<div class="spinner"></div> Step 1/2: Approve marketplace in MetaMask…`;
+            const approveTx = await nftWithSigner.approve(CONTRACTS.sepolia.marketplace, activeModalTokenId);
+            await approveTx.wait(1);
+        }
+
+        // 2. List
+        dom.sellTxStatus.innerHTML = `<div class="spinner"></div> Step 2/2: Confirm listing in MetaMask…`;
+        const priceWei = ethers.parseEther(priceStr);
+        const listTx = await marketWithSigner.listNFT(CONTRACTS.sepolia.nft, activeModalTokenId, priceWei);
+        await listTx.wait(1);
+
+        dom.sellTxStatus.className = "tx-status is-success";
+        dom.sellTxStatus.textContent = `NFT #${activeModalTokenId} listed for ${priceStr} SepoliaETH!`;
+        showSuccess(`NFT #${activeModalTokenId} listed!`);
+
+        setTimeout(() => {
+            dom.sellModal.hidden = true;
+            loadAllTokens();
+            loadActivity();
+        }, 1800);
+    } catch (err) {
+        console.error("Listing error:", err);
         dom.sellTxStatus.className = "tx-status is-error";
-        const code = err.code || err?.info?.error?.code;
-        if (code === "ACTION_REJECTED" || code === 4001) dom.sellTxStatus.textContent = "❌ Cancelled.";
-        else dom.sellTxStatus.textContent = "❌ Listing failed.";
-    }).finally(() => dom.sellConfirmBtn.disabled = false);
-});
+        dom.sellTxStatus.textContent = err.code === 4001 ? "Listing cancelled." : "Listing failed: " + (err.message || "");
+    } finally {
+        dom.sellConfirmBtn.disabled = false;
+    }
+}
 
-// Transfer confirm
-dom.transferConfirmBtn.addEventListener("click", () => {
-    const addr = dom.transferAddressInput.value.trim();
+// Cancel Listing Flow
+async function executeCancelListing(nft) {
+    dom.modalTxStatus.hidden = false;
+    dom.modalTxStatus.className = "tx-status is-pending";
+    dom.modalTxStatus.innerHTML = `<div class="spinner"></div> Confirm cancellation in MetaMask…`;
+
+    try {
+        const signerInstance = await getSigner();
+        const marketWithSigner = new ethers.Contract(CONTRACTS.sepolia.marketplace, MARKETPLACE_ABI, signerInstance);
+
+        const tx = await marketWithSigner.cancelListing(CONTRACTS.sepolia.nft, nft.tokenId);
+        dom.modalTxStatus.innerHTML = `<div class="spinner"></div> Cancelling listing on Sepolia…`;
+        await tx.wait(1);
+
+        dom.modalTxStatus.className = "tx-status is-success";
+        dom.modalTxStatus.textContent = `Listing cancelled for Token #${nft.tokenId}.`;
+        showSuccess("Listing cancelled.");
+
+        setTimeout(() => {
+            dom.nftModal.hidden = true;
+            loadAllTokens();
+            loadActivity();
+        }, 1800);
+    } catch (err) {
+        console.error("Cancel listing error:", err);
+        dom.modalTxStatus.className = "tx-status is-error";
+        dom.modalTxStatus.textContent = err.code === 4001 ? "Cancellation rejected." : "Failed to cancel listing.";
+    }
+}
+
+// Transfer NFT Flow
+async function executeTransfer() {
+    if (!activeModalTokenId) return;
+    const recipient = dom.transferAddressInput.value.trim();
+    if (!ethers.isAddress(recipient)) {
+        dom.transferAddressError.textContent = "Please enter a valid Ethereum address.";
+        dom.transferAddressError.hidden = false;
+        return;
+    }
     dom.transferAddressError.hidden = true;
-    dom.transferAddressInput.classList.remove("is-invalid");
-    if (!addr) { fieldError(dom.transferAddressInput, dom.transferAddressError, "Enter a wallet address."); return; }
+
     dom.transferConfirmBtn.disabled = true;
-    transferNFT(activeModalTokenId, addr).catch(err => {
-        console.error(err);
-        dom.transferTxStatus.hidden = false;
+    dom.transferTxStatus.hidden = false;
+    dom.transferTxStatus.className = "tx-status is-pending";
+    dom.transferTxStatus.innerHTML = `<div class="spinner"></div> Confirm transfer in MetaMask…`;
+
+    try {
+        const signerInstance = await getSigner();
+        const nftWithSigner = new ethers.Contract(CONTRACTS.sepolia.nft, NFT_ABI, signerInstance);
+
+        const tx = await nftWithSigner.transferFrom(currentAccount, recipient, activeModalTokenId);
+        dom.transferTxStatus.innerHTML = `<div class="spinner"></div> Transferring NFT on Sepolia…`;
+        await tx.wait(1);
+
+        dom.transferTxStatus.className = "tx-status is-success";
+        dom.transferTxStatus.textContent = `NFT transferred to ${shortenAddress(recipient)}!`;
+        showSuccess("NFT Transferred!");
+
+        setTimeout(() => {
+            dom.transferModal.hidden = true;
+            loadAllTokens();
+            loadActivity();
+        }, 1800);
+    } catch (err) {
+        console.error("Transfer error:", err);
         dom.transferTxStatus.className = "tx-status is-error";
-        const code = err.code || err?.info?.error?.code;
-        if (code === "ACTION_REJECTED" || code === 4001) dom.transferTxStatus.textContent = "❌ Cancelled.";
-        else if (err.message?.includes("insufficient funds")) dom.transferTxStatus.textContent = "❌ Not enough Sepolia ETH.";
-        else dom.transferTxStatus.textContent = "❌ Transfer failed.";
-    }).finally(() => dom.transferConfirmBtn.disabled = false);
-});
-
+        dom.transferTxStatus.textContent = err.code === 4001 ? "Transfer rejected." : "Transfer failed: " + (err.message || "");
+    } finally {
+        dom.transferConfirmBtn.disabled = false;
+    }
+}
 
 // ============================================================
-// 22. METAMASK EVENT HANDLERS & IDEMPOTENT REGISTRATION
+// 20. BLOCKCHAIN IDENTITY (USERSTORAGE)
 // ============================================================
 
-function handleAccountsChanged(accounts) {
-    if (!accounts || accounts.length === 0) {
-        currentAccount      = null;
-        signer              = null;
-        contract            = null;
-        nftContract         = null;
-        nftContractWrite    = null;
-        marketContract      = null;
-        marketContractWrite = null;
-        hideConnectedUI();
-        resetConnectButton();
-        updateNetworkBadge();
-        return;
-    }
-    if (accounts[0] === currentAccount) return;
-    currentAccount = accounts[0];
-    postConnection();
-}
-
-function handleChainChanged(hex) {
-    const newChainId = parseInt(hex, 16).toString();
-    if (newChainId === currentChainId) return;
-    currentChainId = newChainId;
-    updateNetworkBadge();
-    if (!isSepoliaActive()) {
-        showWrongNetwork();
-        return;
-    }
-    hideWrongNetwork();
-    if (currentAccount) postConnection();
-}
-
-function handleDisconnect(error) {
-    console.warn("MetaMask disconnected:", error);
-    handleAccountsChanged([]);
-}
-
-/**
- * Safely unbinds a MetaMask provider event listener if previously registered.
- */
-function safeOff(event, handler) {
-    if (!window.ethereum) return;
-    try {
-        const fn = window.ethereum.removeListener;
-        if (typeof fn === "function") {
-            fn.call(window.ethereum, event, handler);
-            return;
-        }
-    } catch (_) {}
+async function loadUserData() {
+    if (!contract || !currentAccount || !isSepoliaActive()) return;
+    if (dom.identityLoading) dom.identityLoading.hidden = false;
+    if (dom.identityEmpty) dom.identityEmpty.hidden = true;
+    if (dom.identityData) dom.identityData.hidden = true;
 
     try {
-        if (typeof window.ethereum.off === "function") {
-            window.ethereum.off(event, handler);
-            return;
-        }
-    } catch (_) {}
+        const [name, role] = await contract.getUser(currentAccount);
+        if (dom.identityLoading) dom.identityLoading.hidden = true;
 
-    if (event === "accountsChanged" && accountsPollInterval) {
-        clearInterval(accountsPollInterval);
-        accountsPollInterval = null;
-    }
-    if (event === "chainChanged" && chainPollInterval) {
-        clearInterval(chainPollInterval);
-        chainPollInterval = null;
-    }
-}
-
-/**
- * Safe event listener registration with single-interval fallback to prevent
- * multiple timers and duplicate event listener warnings.
- */
-function safeOn(event, handler) {
-    if (!window.ethereum) return;
-
-    try {
-        const fn = window.ethereum.on;
-        if (typeof fn === "function") {
-            fn.call(window.ethereum, event, handler);
-            return;
-        }
-    } catch (_) {}
-
-    try {
-        if (typeof window.ethereum.addListener === "function") {
-            window.ethereum.addListener(event, handler);
-            return;
-        }
-    } catch (_) {}
-
-    // Fallback polling (clears previous interval to avoid duplicates)
-    if (event === "accountsChanged") {
-        if (accountsPollInterval) clearInterval(accountsPollInterval);
-        accountsPollInterval = setInterval(async () => {
-            try {
-                const a = await window.ethereum.request({ method: "eth_accounts" });
-                if ((a[0] || null) !== currentAccount) handleAccountsChanged(a);
-            } catch (_) {}
-        }, 2000);
-    }
-    if (event === "chainChanged") {
-        if (chainPollInterval) clearInterval(chainPollInterval);
-        chainPollInterval = setInterval(async () => {
-            try {
-                const c = await window.ethereum.request({ method: "eth_chainId" });
-                const d = parseInt(c, 16).toString();
-                if (d !== currentChainId) handleChainChanged(c);
-            } catch (_) {}
-        }, 2000);
-    }
-}
-
-/**
- * Registers MetaMask event listeners exactly once across app lifecycle.
- */
-function registerMetaMaskListeners() {
-    if (isMetaMaskListenersRegistered || !window.ethereum) return;
-    isMetaMaskListenersRegistered = true;
-    safeOn("accountsChanged", handleAccountsChanged);
-    safeOn("chainChanged", handleChainChanged);
-    safeOn("disconnect", handleDisconnect);
-}
-
-
-// ============================================================
-// 23. IDEMPOTENT INITIALISATION
-// ============================================================
-
-async function init() {
-    if (isInitialized) return;
-    isInitialized = true;
-
-    registerMetaMaskListeners();
-
-    if (!window.ethereum) {
-        showNoMetaMask();
-        return;
-    }
-
-    try {
-        const accounts = await window.ethereum.request({ method: "eth_accounts" });
-        if (accounts.length > 0) {
-            currentAccount = accounts[0];
-            await postConnection();
+        if (name === "" && role === "") {
+            if (dom.identityEmpty) dom.identityEmpty.hidden = false;
+            dom.formTitle.textContent = "📝 Save Identity on Blockchain";
+            dom.inputName.value = "";
+            dom.inputRole.value = "";
+            dom.submitBtn.textContent = "Save to Blockchain";
+        } else {
+            if (dom.identityData) dom.identityData.hidden = false;
+            dom.displayName.textContent = name;
+            dom.displayRole.textContent = role;
+            dom.displayWallet.textContent = currentAccount;
+            dom.formTitle.textContent = "📝 Update Identity on Blockchain";
+            dom.inputName.value = name;
+            dom.inputRole.value = role;
+            dom.submitBtn.textContent = "Update on Blockchain";
         }
     } catch (err) {
-        console.error("Init error:", err);
+        console.warn("loadUserData warning:", err);
+        if (dom.identityLoading) dom.identityLoading.hidden = true;
+        if (dom.identityEmpty) dom.identityEmpty.hidden = false;
     }
 }
 
-init();
+async function storeUserData() {
+    if (!window.ethereum) { showNoMetaMask(); return; }
+    if (!currentAccount) {
+        showError("Please connect your MetaMask wallet first.");
+        await connectWallet();
+        return;
+    }
+    if (!isSepoliaActive()) { showError("Please switch to Sepolia."); return; }
+
+    const name = dom.inputName.value.trim();
+    const role = dom.inputRole.value.trim();
+
+    let ok = true;
+    if (!name) { dom.nameError.textContent = "Name is required."; dom.nameError.hidden = false; ok = false; }
+    else dom.nameError.hidden = true;
+
+    if (!role) { dom.roleError.textContent = "Role is required."; dom.roleError.hidden = false; ok = false; }
+    else dom.roleError.hidden = true;
+
+    if (!ok) return;
+
+    dom.submitBtn.disabled = true;
+    dom.txCard.hidden = false;
+    dom.txStatus.className = "tx-status is-pending";
+    dom.txStatus.innerHTML = `<div class="spinner"></div> Confirm identity transaction in MetaMask…`;
+
+    try {
+        const signerInstance = await getSigner();
+        const contractWithSigner = new ethers.Contract(USER_STORAGE_ADDRESS, USER_STORAGE_ABI, signerInstance);
+
+        const tx = await contractWithSigner.storeUser(name, role);
+        dom.txStatus.innerHTML = `<div class="spinner"></div> Identity update sent! Waiting for Sepolia block confirmation…`;
+
+        const receipt = await tx.wait(1);
+        dom.txStatus.className = "tx-status is-success";
+        dom.txStatus.textContent = "Identity saved on Ethereum Sepolia ✓";
+        dom.txHash.textContent = receipt.hash;
+        dom.txBlock.textContent = receipt.blockNumber;
+        dom.txResult.textContent = "Success";
+        dom.etherscanTxLink.href = `${ETHERSCAN_BASE_URL}/tx/${receipt.hash}`;
+        dom.txDetails.hidden = false;
+        dom.txActions.hidden = false;
+
+        showSuccess("Identity saved to blockchain!");
+        loadUserData();
+    } catch (err) {
+        console.error("storeUserData error:", err);
+        dom.txStatus.className = "tx-status is-error";
+        dom.txStatus.textContent = err.code === 4001 ? "Transaction cancelled in MetaMask." : "Failed to save identity.";
+    } finally {
+        dom.submitBtn.disabled = false;
+    }
+}
+
+// ============================================================
+// 21. TAB NAVIGATION
+// ============================================================
+
+function switchTab(tabKey) {
+    activeTab = tabKey;
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.tab === tabKey);
+    });
+
+    const tabMap = {
+        "explore":     "tabExplore",
+        "marketplace": "tabMarketplace",
+        "create-nft":  "tabCreateNft",
+        "my-nfts":     "tabMyNfts",
+        "identity":    "tabIdentity",
+        "activity":    "tabActivity"
+    };
+
+    document.querySelectorAll(".tab-content").forEach(tc => {
+        tc.classList.toggle("active", tc.id === tabMap[tabKey]);
+    });
+
+    if (tabKey === "marketplace") renderMarketplace();
+    if (tabKey === "my-nfts") renderPortfolio();
+    if (tabKey === "activity") loadActivity();
+}
+
+// ============================================================
+// 22. LIVE PREVIEW IN CREATOR STUDIO
+// ============================================================
+
+function updateLivePreview() {
+    const name = dom.nftNameInput?.value?.trim() || "Untitled Creation";
+    const desc = dom.nftDescInput?.value?.trim() || "Description will appear here…";
+    const img  = dom.nftImageInput?.value?.trim() || "favicon.svg";
+    const cat  = dom.nftCategoryInput?.value?.trim() || "Art";
+    const price= dom.nftInitialPriceInput?.value?.trim();
+
+    if (dom.previewTitle) dom.previewTitle.textContent = name;
+    if (dom.previewDesc) dom.previewDesc.textContent = desc;
+    if (dom.previewCategory) dom.previewCategory.textContent = cat;
+    if (dom.previewImg) dom.previewImg.src = img;
+    if (dom.previewPrice) dom.previewPrice.textContent = price ? `${price} SepoliaETH` : "— SepoliaETH";
+}
+
+// ============================================================
+// 23. EVENT LISTENERS & INITIALISATION
+// ============================================================
+
+document.addEventListener("DOMContentLoaded", () => {
+    // Navigation
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+        btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+    });
+
+    document.querySelectorAll("[data-tab-link]").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            switchTab(btn.dataset.tabLink);
+        });
+    });
+
+    if (dom.logoLink) {
+        dom.logoLink.addEventListener("click", () => switchTab("explore"));
+    }
+
+    // Wallet & Drawer
+    dom.connectBtn.addEventListener("click", () => {
+        if (currentAccount) {
+            dom.walletDrawer.hidden = !dom.walletDrawer.hidden;
+        } else {
+            connectWallet();
+        }
+    });
+
+    if (dom.closeWalletDrawer) dom.closeWalletDrawer.addEventListener("click", () => dom.walletDrawer.hidden = true);
+    if (dom.disconnectBtn) dom.disconnectBtn.addEventListener("click", () => {
+        currentAccount = null;
+        dom.walletDrawer.hidden = true;
+        updateWalletUI();
+        showToast("Disconnected", "🔌");
+    });
+    if (dom.drawerCopyBtn) dom.drawerCopyBtn.addEventListener("click", () => {
+        if (currentAccount) navigator.clipboard.writeText(currentAccount).then(() => showSuccess("Address copied!"));
+    });
+
+    // Mobile Navigation Toggle
+    if (dom.mobileNavToggle) {
+        dom.mobileNavToggle.addEventListener("click", () => {
+            document.querySelector(".header").classList.toggle("nav-mobile-open");
+        });
+    }
+
+    // Network
+    if (dom.switchNetworkBtn) dom.switchNetworkBtn.addEventListener("click", switchToSepolia);
+
+    // Marketplace Toolbar
+    if (dom.marketSearchInput) dom.marketSearchInput.addEventListener("input", () => renderMarketplace());
+    if (dom.marketSortSelect) dom.marketSortSelect.addEventListener("change", (e) => {
+        currentMarketSort = e.target.value;
+        renderMarketplace();
+    });
+
+    document.querySelectorAll("[data-market-filter]").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll("[data-market-filter]").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            currentMarketFilter = btn.dataset.marketFilter;
+            renderMarketplace();
+        });
+    });
+
+    // Portfolio Toolbar
+    document.querySelectorAll("[data-portfolio-filter]").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll("[data-portfolio-filter]").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            currentPortfolioFilter = btn.dataset.portfolioFilter;
+            renderPortfolio();
+        });
+    });
+
+    if (dom.refreshMyNftsBtn) dom.refreshMyNftsBtn.addEventListener("click", () => loadAllTokens());
+
+    // Activity Toolbar
+    document.querySelectorAll("[data-act-filter]").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll("[data-act-filter]").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            currentActFilter = btn.dataset.actFilter;
+            renderActivityTable();
+        });
+    });
+
+    if (dom.refreshActivityBtn) dom.refreshActivityBtn.addEventListener("click", () => loadActivity());
+
+    // Creator Studio: Live Preview Inputs
+    [dom.nftNameInput, dom.nftDescInput, dom.nftImageInput, dom.nftCategoryInput, dom.nftInitialPriceInput].forEach(inp => {
+        if (inp) {
+            inp.addEventListener("input", updateLivePreview);
+            inp.addEventListener("change", updateLivePreview);
+        }
+    });
+
+    // Sample Art Buttons
+    if (dom.sampleArt1) dom.sampleArt1.addEventListener("click", () => {
+        dom.nftNameInput.value = "Cyber Punk Samurai #01";
+        dom.nftDescInput.value = "Futuristic decentralized digital identity from the Neo-Tokyo Sepolia district.";
+        dom.nftImageInput.value = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800";
+        dom.nftCategoryInput.value = "Cyberpunk";
+        updateLivePreview();
+    });
+    if (dom.sampleArt2) dom.sampleArt2.addEventListener("click", () => {
+        dom.nftNameInput.value = "Cosmic Nebula Genesis";
+        dom.nftDescInput.value = "Interstellar generative cosmic dust captured across Ethereum block boundaries.";
+        dom.nftImageInput.value = "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=800";
+        dom.nftCategoryInput.value = "Generative Space";
+        updateLivePreview();
+    });
+    if (dom.sampleArt3) dom.sampleArt3.addEventListener("click", () => {
+        dom.nftNameInput.value = "Sovereign Identity Badge";
+        dom.nftDescInput.value = "Verifiable cryptographic credential minted on Sepolia for decentralized authentication.";
+        dom.nftImageInput.value = "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800";
+        dom.nftCategoryInput.value = "Identity Badge";
+        updateLivePreview();
+    });
+
+    // Mode Toggle
+    if (dom.modeAutoBtn) dom.modeAutoBtn.addEventListener("click", () => {
+        metadataMode = "auto";
+        dom.modeAutoBtn.className = "btn btn--sm btn--primary";
+        dom.modeManualBtn.className = "btn btn--sm btn--ghost";
+        dom.autoMetadataFields.hidden = false;
+        dom.manualMetadataFields.hidden = true;
+    });
+    if (dom.modeManualBtn) dom.modeManualBtn.addEventListener("click", () => {
+        metadataMode = "manual";
+        dom.modeManualBtn.className = "btn btn--sm btn--primary";
+        dom.modeAutoBtn.className = "btn btn--sm btn--ghost";
+        dom.autoMetadataFields.hidden = true;
+        dom.manualMetadataFields.hidden = false;
+    });
+
+    // Mint Action
+    if (dom.mintBtn) dom.mintBtn.addEventListener("click", mintNFT);
+
+    // Identity Actions
+    if (dom.storeForm) dom.storeForm.addEventListener("submit", (e) => { e.preventDefault(); storeUserData(); });
+    if (dom.refreshBtn) dom.refreshBtn.addEventListener("click", loadUserData);
+
+    // Modals Close
+    if (dom.modalClose) dom.modalClose.addEventListener("click", () => dom.nftModal.hidden = true);
+    if (dom.sellModalClose) dom.sellModalClose.addEventListener("click", () => dom.sellModal.hidden = true);
+    if (dom.transferModalClose) dom.transferModalClose.addEventListener("click", () => dom.transferModal.hidden = true);
+
+    // Modal Actions
+    if (dom.sellConfirmBtn) dom.sellConfirmBtn.addEventListener("click", executeList);
+    if (dom.transferConfirmBtn) dom.transferConfirmBtn.addEventListener("click", executeTransfer);
+
+    // Contract Copy Buttons
+    if (dom.copyContractBtn) dom.copyContractBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(CONTRACTS.sepolia.identity).then(() => showSuccess("Identity contract copied!"));
+    });
+    if (dom.copyNftContractBtn) dom.copyNftContractBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(CONTRACTS.sepolia.nft).then(() => showSuccess("NFT contract copied!"));
+    });
+    if (dom.copyMarketplaceBtn) dom.copyMarketplaceBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(CONTRACTS.sepolia.marketplace).then(() => showSuccess("Marketplace contract copied!"));
+    });
+
+    // Boot
+    init();
+});
