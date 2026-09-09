@@ -28,6 +28,9 @@ const ETHERSCAN_BASE_URL       = "https://sepolia.etherscan.io";
 const IPFS_GATEWAY             = "https://ipfs.io/ipfs/";
 const ZERO_ADDRESS             = "0x0000000000000000000000000000000000000000";
 
+// Permanently removed/filtered tokens (e.g. test tokens #0, #1, #2)
+const REMOVED_TOKEN_IDS        = new Set(["0", "1", "2"]);
+
 // ============================================================
 // 2. CONTRACT ABIs
 // ============================================================
@@ -116,6 +119,11 @@ const dom = {
     marketSortSelect:          el("marketSortSelect"),
     marketLoading:             el("marketLoading"),
     marketEmpty:               el("marketEmpty"),
+    marketEmptyTitle:          el("marketEmptyTitle"),
+    marketEmptySubtitle:       el("marketEmptySubtitle"),
+    marketStatListed:          el("marketStatListed"),
+    marketStatUnlisted:        el("marketStatUnlisted"),
+    marketStatAll:             el("marketStatAll"),
     marketGrid:                el("marketGrid"),
 
     // Create Studio & Live Preview
@@ -162,6 +170,7 @@ const dom = {
     portStatOwned:             el("portStatOwned"),
     portStatCreated:           el("portStatCreated"),
     portStatListed:            el("portStatListed"),
+    portStatHidden:            el("portStatHidden"),
     refreshMyNftsBtn:          el("refreshMyNftsBtn"),
     myNftsLoading:             el("myNftsLoading"),
     myNftsEmpty:               el("myNftsEmpty"),
@@ -239,6 +248,15 @@ const dom = {
     transferTxStatus:          el("transferTxStatus"),
     transferConfirmBtn:        el("transferConfirmBtn"),
 
+    // Delist Modal (Remove from Marketplace)
+    delistModal:               el("delistModal"),
+    delistModalClose:          el("delistModalClose"),
+    delistTokenDisplay:        el("delistTokenDisplay"),
+    delistPriceDisplay:        el("delistPriceDisplay"),
+    delistTxStatus:            el("delistTxStatus"),
+    delistConfirmBtn:          el("delistConfirmBtn"),
+    delistCancelBtn:           el("delistCancelBtn"),
+
     // Toast
     toastContainer:            el("toastContainer")
 };
@@ -266,11 +284,37 @@ let nftMetadataCache     = new Map();
 
 // Active Filters & UI State
 let activeTab            = "explore";
-let currentMarketFilter  = "all";
+let currentMarketFilter  = "for-sale";  // Default: Listed for Sale (removes non-listed NFTs from marketplace)
 let currentMarketSort    = "newest";
 let currentPortfolioFilter = "owned";
 let currentActFilter     = "all";
 let activeModalTokenId   = null;
+let activeDelistTokenId  = null;
+
+// Hidden Tokens Local Persistence
+function getHiddenTokens() {
+    try {
+        return new Set(JSON.parse(localStorage.getItem("binft_hidden_tokens") || "[]"));
+    } catch { return new Set(); }
+}
+
+function toggleHideToken(tokenId) {
+    const hidden = getHiddenTokens();
+    const idStr = tokenId.toString();
+    if (hidden.has(idStr)) {
+        hidden.delete(idStr);
+        showToast(`Token #${idStr} restored to view`, "👁️");
+    } else {
+        hidden.add(idStr);
+        showToast(`Token #${idStr} hidden from portfolio`, "🙈");
+    }
+    try {
+        localStorage.setItem("binft_hidden_tokens", JSON.stringify(Array.from(hidden)));
+    } catch {}
+    renderMarketplace();
+    renderPortfolio();
+    updateStatsRibbon();
+}
 
 let isMetaMaskListenersRegistered = false;
 let isConnecting                  = false;
@@ -681,6 +725,8 @@ async function fetchMetadata(uri) {
 
 async function getNFTDetails(tokenId) {
     if (!nftContract) return null;
+    const idStr = tokenId.toString();
+    if (REMOVED_TOKEN_IDS.has(idStr)) return null;
     try {
         const [owner, uri, creator] = await Promise.all([
             nftContract.ownerOf(tokenId),
@@ -752,6 +798,7 @@ async function loadAllTokens() {
         const tokens = [];
 
         for (let i = 0; i < total; i++) {
+            if (REMOVED_TOKEN_IDS.has(i.toString())) continue;
             const details = await getNFTDetails(i);
             if (details) tokens.push(details);
         }
@@ -769,11 +816,16 @@ async function loadAllTokens() {
 function updateStatsRibbon() {
     const totalMinted = allTokensCache.length;
     const listed = allTokensCache.filter(t => t.listing.active).length;
+    const unlisted = totalMinted - listed;
     const uniqueCreators = new Set(allTokensCache.map(t => t.creator.toLowerCase())).size;
 
     if (dom.statExploreTotalMinted) dom.statExploreTotalMinted.textContent = totalMinted;
     if (dom.statExploreListed) dom.statExploreListed.textContent = listed;
     if (dom.statExploreCreators) dom.statExploreCreators.textContent = uniqueCreators;
+
+    if (dom.marketStatListed) dom.marketStatListed.textContent = listed;
+    if (dom.marketStatUnlisted) dom.marketStatUnlisted.textContent = unlisted;
+    if (dom.marketStatAll) dom.marketStatAll.textContent = totalMinted;
 }
 
 // ============================================================
@@ -783,17 +835,25 @@ function updateStatsRibbon() {
 function renderExploreShowcase() {
     if (!dom.exploreFeaturedGrid) return;
     dom.exploreFeaturedGrid.innerHTML = "";
-    if (allTokensCache.length === 0) {
+
+    // In Featured Marketplace Listings, only showcase actively listed items
+    const listedTokens = allTokensCache.filter(t => t.listing.active);
+
+    if (listedTokens.length === 0) {
         dom.exploreFeaturedGrid.innerHTML = `
-            <div class="state-msg" style="grid-column: 1 / -1;">
-                <p>No NFTs minted on Sepolia yet.</p>
-                <button class="btn btn--primary btn--sm" data-tab-link="create-nft">Create the First NFT</button>
+            <div class="state-msg" style="grid-column: 1 / -1; padding: 2.5rem 1.5rem;">
+                <p style="font-size:1.1rem; font-weight:600;">No NFTs currently listed on the marketplace</p>
+                <p class="hint">Mint a creation or list an unlisted NFT in your portfolio to get featured here!</p>
+                <div style="display:flex; gap:0.75rem; justify-content:center; margin-top:1rem; flex-wrap:wrap;">
+                    <button class="btn btn--primary btn--sm" data-tab-link="create-nft">🎨 Create & List NFT</button>
+                    <button class="btn btn--secondary btn--sm" data-tab-link="my-nfts">🖼️ View My Portfolio</button>
+                </div>
             </div>`;
         return;
     }
 
-    // Display up to 3 spotlight NFTs
-    const spotlight = allTokensCache.slice(-3).reverse();
+    // Display up to 3 spotlight listed NFTs
+    const spotlight = listedTokens.slice(-3).reverse();
     for (const nft of spotlight) {
         dom.exploreFeaturedGrid.appendChild(createNFTCardElement(nft));
     }
@@ -808,7 +868,8 @@ function renderMarketplace() {
     dom.marketGrid.innerHTML = "";
 
     const query = (dom.marketSearchInput?.value || "").trim().toLowerCase();
-    let filtered = [...allTokensCache];
+    const hiddenTokens = getHiddenTokens();
+    let filtered = allTokensCache.filter(t => !hiddenTokens.has(t.tokenId));
 
     // Search filter
     if (query) {
@@ -822,11 +883,13 @@ function renderMarketplace() {
     // Category / State filter
     if (currentMarketFilter === "for-sale") {
         filtered = filtered.filter(t => t.listing.active);
+    } else if (currentMarketFilter === "unlisted") {
+        filtered = filtered.filter(t => !t.listing.active);
     } else if (currentMarketFilter === "owned" && currentAccount) {
         filtered = filtered.filter(t => t.owner.toLowerCase() === currentAccount.toLowerCase());
     } else if (currentMarketFilter === "created" && currentAccount) {
         filtered = filtered.filter(t => t.creator.toLowerCase() === currentAccount.toLowerCase());
-    }
+    } // "all" keeps all non-hidden tokens
 
     // Sort
     if (currentMarketSort === "newest") {
@@ -848,7 +911,19 @@ function renderMarketplace() {
     }
 
     if (filtered.length === 0) {
-        if (dom.marketEmpty) dom.marketEmpty.hidden = false;
+        if (dom.marketEmpty) {
+            dom.marketEmpty.hidden = false;
+            if (currentMarketFilter === "for-sale") {
+                if (dom.marketEmptyTitle) dom.marketEmptyTitle.textContent = "No NFTs currently listed for sale";
+                if (dom.marketEmptySubtitle) dom.marketEmptySubtitle.textContent = "All NFTs are currently unlisted. Be the first to list an NFT on the marketplace!";
+            } else if (currentMarketFilter === "unlisted") {
+                if (dom.marketEmptyTitle) dom.marketEmptyTitle.textContent = "No non-listed NFTs found";
+                if (dom.marketEmptySubtitle) dom.marketEmptySubtitle.textContent = "All NFTs are currently listed on the marketplace.";
+            } else {
+                if (dom.marketEmptyTitle) dom.marketEmptyTitle.textContent = "No NFTs match your search or filter";
+                if (dom.marketEmptySubtitle) dom.marketEmptySubtitle.textContent = "Try adjusting your search keywords or filter criteria.";
+            }
+        }
         return;
     }
     if (dom.marketEmpty) dom.marketEmpty.hidden = true;
@@ -865,12 +940,37 @@ function createNFTCardElement(nft) {
     const isListed = nft.listing.active;
     const isOwner = currentAccount && nft.owner.toLowerCase() === currentAccount.toLowerCase();
     const priceEth = isListed ? ethers.formatEther(nft.listing.price) : null;
+    const hiddenTokens = getHiddenTokens();
+    const isHidden = hiddenTokens.has(nft.tokenId);
 
     let badgeMarkup = `<span class="badge badge--offline">Unlisted</span>`;
     if (isListed) {
         badgeMarkup = `<span class="badge badge--success">🏷️ ${priceEth} SepoliaETH</span>`;
     } else if (isOwner) {
         badgeMarkup = `<span class="badge badge--accent">👤 You Own</span>`;
+    }
+
+    // Contextual action buttons
+    let actionButtons = `<button class="btn btn--primary btn--sm view-btn">View Details</button>`;
+    if (isListed && isOwner) {
+        actionButtons = `
+            <button class="btn btn--danger btn--sm delist-card-btn" data-delist-id="${nft.tokenId}" title="Remove from Marketplace">✕ Remove</button>
+            <button class="btn btn--ghost btn--sm view-btn">Details</button>
+        `;
+    } else if (!isListed && isOwner) {
+        if (isHidden) {
+            actionButtons = `
+                <button class="btn btn--secondary btn--sm unhide-card-btn" data-unhide-id="${nft.tokenId}">Unhide</button>
+                <button class="btn btn--ghost btn--sm view-btn">Details</button>
+            `;
+        } else {
+            actionButtons = `
+                <button class="btn btn--primary btn--sm list-card-btn" data-list-id="${nft.tokenId}">🏷️ List</button>
+                <button class="btn btn--ghost btn--sm view-btn">Details</button>
+            `;
+        }
+    } else if (isListed && !isOwner) {
+        actionButtons = `<button class="btn btn--primary btn--sm view-btn">Buy / Details</button>`;
     }
 
     card.innerHTML = `
@@ -893,11 +993,38 @@ function createNFTCardElement(nft) {
                     <span class="nft-price-value">${isListed ? `${priceEth} ETH` : (isOwner ? "In Wallet" : "Not Listed")}</span>
                 </div>
                 <div class="nft-card-actions">
-                    <button class="btn btn--primary btn--sm view-btn">View Details</button>
+                    ${actionButtons}
                 </div>
             </div>
         </div>
     `;
+
+    // Hook quick button events
+    const delistBtn = card.querySelector(".delist-card-btn");
+    if (delistBtn) {
+        delistBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openDelistModal(nft.tokenId);
+        });
+    }
+
+    const listBtn = card.querySelector(".list-card-btn");
+    if (listBtn) {
+        listBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            activeModalTokenId = nft.tokenId;
+            dom.sellPriceInput.value = "";
+            dom.sellModal.hidden = false;
+        });
+    }
+
+    const unhideBtn = card.querySelector(".unhide-card-btn");
+    if (unhideBtn) {
+        unhideBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            toggleHideToken(nft.tokenId);
+        });
+    }
 
     card.addEventListener("click", () => openNFTModal(nft.tokenId));
     return card;
@@ -917,17 +1044,22 @@ function renderPortfolio() {
         return;
     }
 
-    const owned = allTokensCache.filter(t => t.owner.toLowerCase() === currentAccount.toLowerCase());
-    const created = allTokensCache.filter(t => t.creator.toLowerCase() === currentAccount.toLowerCase());
-    const listed = owned.filter(t => t.listing.active);
+    const hiddenTokens = getHiddenTokens();
+    const userOwnedAll = allTokensCache.filter(t => t.owner.toLowerCase() === currentAccount.toLowerCase());
+    const ownedVisible = userOwnedAll.filter(t => !hiddenTokens.has(t.tokenId));
+    const createdVisible = allTokensCache.filter(t => t.creator.toLowerCase() === currentAccount.toLowerCase() && !hiddenTokens.has(t.tokenId));
+    const listed = ownedVisible.filter(t => t.listing.active);
+    const hiddenList = userOwnedAll.filter(t => hiddenTokens.has(t.tokenId));
 
-    if (dom.portStatOwned) dom.portStatOwned.textContent = owned.length;
-    if (dom.portStatCreated) dom.portStatCreated.textContent = created.length;
+    if (dom.portStatOwned) dom.portStatOwned.textContent = ownedVisible.length;
+    if (dom.portStatCreated) dom.portStatCreated.textContent = createdVisible.length;
     if (dom.portStatListed) dom.portStatListed.textContent = listed.length;
+    if (dom.portStatHidden) dom.portStatHidden.textContent = hiddenList.length;
 
-    let displayList = owned;
-    if (currentPortfolioFilter === "created") displayList = created;
+    let displayList = ownedVisible;
+    if (currentPortfolioFilter === "created") displayList = createdVisible;
     if (currentPortfolioFilter === "listed") displayList = listed;
+    if (currentPortfolioFilter === "hidden") displayList = hiddenList;
 
     if (displayList.length === 0) {
         dom.myNftsEmpty.hidden = false;
@@ -964,12 +1096,14 @@ async function loadActivity() {
         const transferLogs = await getLogsInChunks(nftContract, transferFilter);
 
         for (const log of transferLogs) {
+            const tokenId = log.args.tokenId.toString();
+            if (REMOVED_TOKEN_IDS.has(tokenId)) continue;
             const from = log.args.from;
             const to   = log.args.to;
             const isMint = from === ZERO_ADDRESS;
             events.push({
                 type: isMint ? "Mint" : "Transfer",
-                tokenId: log.args.tokenId.toString(),
+                tokenId: tokenId,
                 from: isMint ? "Genesis" : from,
                 to: to,
                 price: "—",
@@ -987,9 +1121,11 @@ async function loadActivity() {
             ]);
 
             for (const l of listedLogs) {
+                const tokenId = l.args.tokenId.toString();
+                if (REMOVED_TOKEN_IDS.has(tokenId)) continue;
                 events.push({
                     type: "Listed",
-                    tokenId: l.args.tokenId.toString(),
+                    tokenId: tokenId,
                     from: l.args.seller,
                     to: "Marketplace",
                     price: ethers.formatEther(l.args.price) + " ETH",
@@ -999,9 +1135,11 @@ async function loadActivity() {
             }
 
             for (const s of soldLogs) {
+                const tokenId = s.args.tokenId.toString();
+                if (REMOVED_TOKEN_IDS.has(tokenId)) continue;
                 events.push({
                     type: "Sale",
-                    tokenId: s.args.tokenId.toString(),
+                    tokenId: tokenId,
                     from: s.args.seller,
                     to: s.args.buyer,
                     price: ethers.formatEther(s.args.price) + " ETH",
@@ -1011,9 +1149,11 @@ async function loadActivity() {
             }
 
             for (const c of cancelLogs) {
+                const tokenId = c.args.tokenId.toString();
+                if (REMOVED_TOKEN_IDS.has(tokenId)) continue;
                 events.push({
                     type: "Cancel",
-                    tokenId: c.args.tokenId.toString(),
+                    tokenId: tokenId,
                     from: c.args.seller,
                     to: "—",
                     price: "—",
@@ -1355,12 +1495,26 @@ async function openNFTModal(tokenId) {
         transferBtn.innerHTML = `📤 Transfer`;
         transferBtn.onclick = () => { dom.nftModal.hidden = true; dom.transferModal.hidden = false; };
         dom.modalActions.appendChild(transferBtn);
+
+        const hideTokens = getHiddenTokens();
+        const isHidden = hideTokens.has(nft.tokenId);
+        const hideBtn = document.createElement("button");
+        hideBtn.className = "btn btn--ghost btn--sm";
+        hideBtn.innerHTML = isHidden ? `👁️ Unhide NFT` : `🙈 Hide from View`;
+        hideBtn.onclick = () => {
+            toggleHideToken(nft.tokenId);
+            dom.nftModal.hidden = true;
+        };
+        dom.modalActions.appendChild(hideBtn);
     } else if (isOwner && isListed) {
-        const cancelBtn = document.createElement("button");
-        cancelBtn.className = "btn btn--danger btn--lg";
-        cancelBtn.innerHTML = `❌ Cancel Listing`;
-        cancelBtn.onclick = () => executeCancelListing(nft);
-        dom.modalActions.appendChild(cancelBtn);
+        const delistBtn = document.createElement("button");
+        delistBtn.className = "btn btn--danger btn--lg";
+        delistBtn.innerHTML = `✕ Remove from Marketplace`;
+        delistBtn.onclick = () => {
+            dom.nftModal.hidden = true;
+            openDelistModal(nft.tokenId);
+        };
+        dom.modalActions.appendChild(delistBtn);
     }
 
     const etherscanBtn = document.createElement("a");
@@ -1462,33 +1616,73 @@ async function executeList() {
     }
 }
 
-// Cancel Listing Flow
-async function executeCancelListing(nft) {
-    dom.modalTxStatus.hidden = false;
-    dom.modalTxStatus.className = "tx-status is-pending";
-    dom.modalTxStatus.innerHTML = `<div class="spinner"></div> Confirm cancellation in MetaMask…`;
+// ============================================================
+// DELIST FLOW (REMOVE FROM MARKETPLACE)
+// ============================================================
+
+function openDelistModal(tokenId) {
+    const nft = allTokensCache.find(t => t.tokenId === tokenId.toString());
+    if (!nft) return;
+    activeDelistTokenId = tokenId.toString();
+
+    if (dom.delistTokenDisplay) dom.delistTokenDisplay.textContent = `#${nft.tokenId} — ${nft.name}`;
+    if (dom.delistPriceDisplay) {
+        const price = nft.listing?.price ? ethers.formatEther(nft.listing.price) : "—";
+        dom.delistPriceDisplay.textContent = `${price} SepoliaETH`;
+    }
+    if (dom.delistTxStatus) {
+        dom.delistTxStatus.hidden = true;
+        dom.delistTxStatus.className = "tx-status";
+        dom.delistTxStatus.innerHTML = "";
+    }
+    if (dom.delistConfirmBtn) dom.delistConfirmBtn.disabled = false;
+    if (dom.delistModal) dom.delistModal.hidden = false;
+}
+
+async function executeRemoveFromMarketplace() {
+    if (!activeDelistTokenId) return;
+    const tokenId = activeDelistTokenId;
+
+    if (!dom.delistConfirmBtn || !dom.delistTxStatus) return;
+    dom.delistConfirmBtn.disabled = true;
+    dom.delistTxStatus.hidden = false;
+    dom.delistTxStatus.className = "tx-status is-pending";
+    dom.delistTxStatus.innerHTML = `<div class="spinner"></div> Confirm removal in MetaMask…`;
 
     try {
         const signerInstance = await getSigner();
         const marketWithSigner = new ethers.Contract(CONTRACTS.sepolia.marketplace, MARKETPLACE_ABI, signerInstance);
 
-        const tx = await marketWithSigner.cancelListing(CONTRACTS.sepolia.nft, nft.tokenId);
-        dom.modalTxStatus.innerHTML = `<div class="spinner"></div> Cancelling listing on Sepolia…`;
+        const tx = await marketWithSigner.cancelListing(CONTRACTS.sepolia.nft, tokenId);
+        dom.delistTxStatus.innerHTML = `<div class="spinner"></div> Removing from Sepolia marketplace…`;
         await tx.wait(1);
 
-        dom.modalTxStatus.className = "tx-status is-success";
-        dom.modalTxStatus.textContent = `Listing cancelled for Token #${nft.tokenId}.`;
-        showSuccess("Listing cancelled.");
+        dom.delistTxStatus.className = "tx-status is-success";
+        dom.delistTxStatus.textContent = `NFT #${tokenId} removed from marketplace!`;
+        showSuccess(`NFT #${tokenId} removed from marketplace!`);
+
+        // Immediately update cached state
+        const cached = allTokensCache.find(t => t.tokenId === tokenId);
+        if (cached) {
+            cached.listing = { active: false, price: 0n, seller: ZERO_ADDRESS };
+        }
 
         setTimeout(() => {
-            dom.nftModal.hidden = true;
-            loadAllTokens();
+            if (dom.delistModal) dom.delistModal.hidden = true;
+            updateStatsRibbon();
+            renderExploreShowcase();
+            renderMarketplace();
+            renderPortfolio();
             loadActivity();
-        }, 1800);
+        }, 1200);
     } catch (err) {
-        console.error("Cancel listing error:", err);
-        dom.modalTxStatus.className = "tx-status is-error";
-        dom.modalTxStatus.textContent = err.code === 4001 ? "Cancellation rejected." : "Failed to cancel listing.";
+        console.error("Delist error:", err);
+        dom.delistTxStatus.className = "tx-status is-error";
+        dom.delistTxStatus.textContent = err.code === 4001 || err.code === "ACTION_REJECTED"
+            ? "Removal cancelled in MetaMask."
+            : "Failed to remove from marketplace: " + (err.message || "");
+    } finally {
+        if (dom.delistConfirmBtn) dom.delistConfirmBtn.disabled = false;
     }
 }
 
@@ -1820,10 +2014,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (dom.modalClose) dom.modalClose.addEventListener("click", () => dom.nftModal.hidden = true);
     if (dom.sellModalClose) dom.sellModalClose.addEventListener("click", () => dom.sellModal.hidden = true);
     if (dom.transferModalClose) dom.transferModalClose.addEventListener("click", () => dom.transferModal.hidden = true);
+    if (dom.delistModalClose) dom.delistModalClose.addEventListener("click", () => dom.delistModal.hidden = true);
+    if (dom.delistCancelBtn) dom.delistCancelBtn.addEventListener("click", () => dom.delistModal.hidden = true);
 
     // Modal Actions
     if (dom.sellConfirmBtn) dom.sellConfirmBtn.addEventListener("click", executeList);
     if (dom.transferConfirmBtn) dom.transferConfirmBtn.addEventListener("click", executeTransfer);
+    if (dom.delistConfirmBtn) dom.delistConfirmBtn.addEventListener("click", executeRemoveFromMarketplace);
 
     // Contract Copy Buttons
     if (dom.copyContractBtn) dom.copyContractBtn.addEventListener("click", () => {
